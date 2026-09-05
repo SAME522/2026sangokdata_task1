@@ -1,5 +1,4 @@
 """실행: streamlit run main.py"""
-import math
 import csv
 import io
 from pathlib import Path
@@ -35,7 +34,8 @@ def parse_data(raw: bytes) -> pd.DataFrame:
         [row for row in rows[index + 1:] if len(row) == len(names)], columns=names
     )
     frame["날짜"] = pd.to_datetime(frame["날짜"].str.strip(), format="%Y-%m-%d", errors="coerce")
-    frame["평균기온"] = pd.to_numeric(frame["평균기온"], errors="coerce")
+    for column in ("평균기온", "최저기온", "최고기온"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["날짜"])
     frame = frame.loc[pd.to_numeric(frame["지점"], errors="coerce").eq(108)]
     if frame.empty:
@@ -56,24 +56,19 @@ def load_data() -> pd.DataFrame:
     return parse_data(raw)
 
 
-def histogram_data(values: pd.Series, width: int) -> pd.DataFrame:
-    """0℃를 기준으로 같은 너비의 구간을 만들고 [하한, 상한)으로 센다."""
-    lower = math.floor(values.min() / width) * width
-    upper = (math.floor(values.max() / width) + 1) * width
-    edges = list(range(lower, upper + 1, width))
-    counts = pd.cut(values, bins=edges, right=False).value_counts(sort=False)
-    return pd.DataFrame({
-        "기온 구간": [f"{left}℃ 이상 ~ {right}℃ 미만" for left, right in zip(edges, edges[1:])],
-        "구간 중심": [(left + right) / 2 for left, right in zip(edges, edges[1:])],
-        "일수": counts.to_numpy(),
-        "비율 (%)": counts.to_numpy() / len(values) * 100,
-    })
+def scatter_data(frame: pd.DataFrame) -> pd.DataFrame:
+    pairs = frame[["날짜", "최저기온", "최고기온"]].replace(
+        [float("inf"), float("-inf")], float("nan")
+    ).dropna(subset=["최저기온", "최고기온"])
+    pairs = pairs.loc[pairs["최저기온"].le(pairs["최고기온"])].copy()
+    pairs["일교차"] = pairs["최고기온"] - pairs["최저기온"]
+    return pairs
 
 
 def main():
-    st.set_page_config(page_title="서울 일별 평균기온 분포", page_icon="🌡️", layout="wide")
-    st.title("서울 일별 평균기온 분포")
-    st.write("어느 기온 구간에 관측일이 많이 모여 있을까요? 막대가 높을수록 해당 기온의 날이 많습니다.")
+    st.set_page_config(page_title="서울 최저·최고기온의 관계", page_icon="🌡️", layout="wide")
+    st.title("서울 최저·최고기온의 관계")
+    st.write("점 하나는 하루입니다. 오른쪽 위에 있는 점일수록 그날의 최저기온과 최고기온이 모두 높습니다.")
     try:
         with st.spinner("서울 기온 데이터를 읽고 있습니다…"):
             daily = load_data()
@@ -89,58 +84,63 @@ def main():
         start, end = st.slider("분석 기간 (연도)", first_year, last_year, (first_year, last_year))
     else:
         start = end = first_year
-    width = st.select_slider("기온 구간 너비 (℃)", options=[1, 2, 3, 5, 10], value=2)
     selected = daily.loc[daily["날짜"].dt.year.between(start, end)]
-    values = selected["평균기온"].replace([float("inf"), float("-inf")], float("nan")).dropna()
-    if values.empty:
-        st.warning("선택한 기간에 유효한 일별 평균기온이 없습니다. 분석 기간을 바꿔 주세요.")
+    pairs = scatter_data(selected)
+    if pairs.empty:
+        st.warning("선택한 기간에 최저기온과 최고기온이 모두 유효한 자료가 없습니다. 분석 기간을 바꿔 주세요.")
         st.stop()
-    counts = histogram_data(values, width)
-    st.caption(
-        f"선택 기간 내 기록: {selected['날짜'].min():%Y-%m-%d} ~ {selected['날짜'].max():%Y-%m-%d} · "
-        f"기온 구간 너비: {width}℃"
-    )
+    st.caption(f"분석에 사용한 날짜: {pairs['날짜'].min():%Y-%m-%d} ~ {pairs['날짜'].max():%Y-%m-%d}")
+    correlation = float("nan")
+    if len(pairs) >= 2 and pairs["최저기온"].nunique() > 1 and pairs["최고기온"].nunique() > 1:
+        correlation = pairs["최저기온"].corr(pairs["최고기온"])
     col1, col2, col3 = st.columns(3)
-    col1.metric("분석에 사용한 관측일", f"{len(values):,}일")
-    col2.metric("일별 평균기온의 평균", f"{values.mean():.2f} ℃")
-    col3.metric("일별 평균기온의 중앙값", f"{values.median():.2f} ℃")
+    col1.metric("분석에 사용한 관측일", f"{len(pairs):,}일")
+    col2.metric("피어슨 상관계수", f"{correlation:.3f}" if pd.notna(correlation) else "계산 불가")
+    col3.metric("평균 일교차", f"{pairs['일교차'].mean():.2f} ℃")
 
-    # 직접 집계한 동일 너비 구간을 붙여 그려 경계와 일수를 정확히 표시한다.
-    fig = go.Figure(go.Bar(
-        x=counts["구간 중심"], y=counts["일수"], width=width,
-        customdata=counts[["기온 구간", "비율 (%)"]].to_numpy(),
-        marker=dict(color="#4F8CC9", line=dict(color="white", width=1)),
-        hovertemplate="%{customdata[0]}<br>%{y:,}일 · %{customdata[1]:.2f}%<extra></extra>",
-        name="관측 일수",
+    fig = go.Figure(go.Scattergl(
+        x=pairs["최저기온"], y=pairs["최고기온"], mode="markers",
+        text=pairs["날짜"].dt.strftime("%Y-%m-%d"),
+        customdata=pairs[["일교차"]].to_numpy(),
+        marker=dict(size=5, opacity=0.3, color="#397CB8"),
+        hovertemplate=("%{text}<br>최저기온: %{x:.1f} ℃<br>최고기온: %{y:.1f} ℃"
+                       "<br>일교차: %{customdata[0]:.1f} ℃<extra></extra>"),
+        name="일별 기온",
+    ))
+    lower = float(pairs["최저기온"].min()) - 2
+    upper = float(pairs["최고기온"].max()) + 2
+    fig.add_trace(go.Scatter(
+        x=[lower, upper], y=[lower, upper], mode="lines",
+        line=dict(color="#9CA3AF", dash="dash", width=1.5),
+        name="최저기온 = 최고기온", hoverinfo="skip",
     ))
     fig.update_layout(
-        height=520, xaxis_title="일별 평균기온 (℃)", yaxis_title="관측 일수 (일)",
+        height=620, xaxis_title="일별 최저기온 (℃)", yaxis_title="일별 최고기온 (℃)",
         template="plotly_white", font=dict(family="sans-serif"),
-        margin=dict(l=30, r=20, t=25, b=30), bargap=0, showlegend=False,
+        margin=dict(l=30, r=20, t=30, b=30),
+        legend=dict(orientation="h", y=1.08, x=0),
     )
-    fig.update_yaxes(rangemode="tozero", tickformat=",d")
+    fig.update_xaxes(range=[lower, upper], constrain="domain")
+    fig.update_yaxes(range=[lower, upper], scaleanchor="x", scaleratio=1, constrain="domain")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-    peaks = counts.loc[counts["일수"].eq(counts["일수"].max())]
-    peak_labels = ", ".join(peaks["기온 구간"])
-    st.info(f"가장 많은 구간: {peak_labels} · 구간당 {int(peaks.iloc[0]['일수']):,}일 ({peaks.iloc[0]['비율 (%)']:.2f}%)")
-    excluded = len(selected) - len(values)
+    st.caption("점이 겹치는 곳은 더 진하게 보입니다. 회색 점선은 최저기온과 최고기온이 같은 기준선이며, 점선보다 위로 멀수록 일교차가 큽니다.")
+    excluded = len(selected) - len(pairs)
     st.caption(
-        f"평균기온이 없거나 유효하지 않은 {excluded:,}개 행은 제외했습니다. "
-        "자료에 날짜 자체가 없는 날도 집계하지 않습니다. "
-        "일부 날짜만 있는 연도도 유효한 관측일은 포함하므로, 이 분포는 확보된 관측자료의 분포입니다."
+        f"최저·최고기온 중 하나라도 없거나 유효하지 않은 행, 최저기온이 최고기온보다 높은 행 등 {excluded:,}개 행을 제외했습니다. "
+        "평균기온의 결측 여부와 관계없이 두 기온이 유효하면 포함합니다."
     )
-    with st.expander("집계 방법과 구간별 일수"):
+    with st.expander("해석 방법과 일별 자료"):
         st.write(
-            "서울 지점(108)의 일별 평균기온을 사용합니다. 각 구간은 하한을 포함하고 상한을 제외합니다. "
-            "예를 들어 0℃ 이상 ~ 2℃ 미만 구간에는 0℃가 포함되고, 2℃는 다음 구간에 포함됩니다. "
-            "비율은 해당 구간 일수를 선택 기간의 유효 관측일 수로 나눈 값입니다. "
-            "이 히스토그램은 계절과 여러 연도가 섞인 기온 분포를 보여 주며, 시간에 따른 변화는 나타내지 않습니다."
+            "같은 날짜의 최저기온과 최고기온을 짝지어 모든 유효 관측일을 표시합니다. "
+            "상관계수는 두 기온의 선형 관계를 요약하며, +1에 가까울수록 함께 높아지는 경향이 강합니다. "
+            "관측일이 2일 미만이거나 어느 한 기온이 모두 같으면 상관계수를 계산하지 않습니다. "
+            "여러 계절과 연도를 합친 관계에는 계절 변화도 반영되며, 상관관계만으로 인과관계나 장기 온난화 추세를 판단할 수 없습니다."
         )
-        table = counts.drop(columns="구간 중심")
+        table = pairs.rename(columns={"최저기온": "최저기온 (℃)", "최고기온": "최고기온 (℃)", "일교차": "일교차 (℃)"})
+        table["날짜"] = table["날짜"].dt.strftime("%Y-%m-%d")
         st.dataframe(table, hide_index=True, use_container_width=True)
-        st.download_button("구간별 자료 내려받기", table.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="서울_일별_평균기온_분포.csv", mime="text/csv")
+        st.download_button("산점도 자료 내려받기", table.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="서울_최저기온_최고기온.csv", mime="text/csv")
     st.markdown(f"[원본 데이터 확인]({DATA_URL})")
 
 
