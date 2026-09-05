@@ -1,5 +1,5 @@
 """실행: streamlit run main.py"""
-import calendar
+import math
 import csv
 import io
 from pathlib import Path
@@ -56,87 +56,91 @@ def load_data() -> pd.DataFrame:
     return parse_data(raw)
 
 
-def annual_data(frame: pd.DataFrame) -> pd.DataFrame:
-    annual = frame.groupby(frame["날짜"].dt.year)["평균기온"].agg(
-        **{"연평균 기온": "mean", "유효 관측일": "count"}
-    )
-    annual = annual.reindex(range(int(annual.index.min()), int(annual.index.max()) + 1))
-    annual.index.name = "연도"
-    annual["유효 관측일"] = annual["유효 관측일"].fillna(0).astype(int)
-    annual["연간 일수"] = [366 if calendar.isleap(year) else 365 for year in annual.index]
-    annual["완전한 연도"] = annual["유효 관측일"].eq(annual["연간 일수"])
-    # 일부 계절만 관측된 해의 평균이 장기 변화로 오해되지 않도록 제외한다.
-    annual.loc[~annual["완전한 연도"], "연평균 기온"] = float("nan")
-    annual["10년 이동평균"] = annual["연평균 기온"].rolling(10, min_periods=10).mean()
-    return annual
+def histogram_data(values: pd.Series, width: int) -> pd.DataFrame:
+    """0℃를 기준으로 같은 너비의 구간을 만들고 [하한, 상한)으로 센다."""
+    lower = math.floor(values.min() / width) * width
+    upper = (math.floor(values.max() / width) + 1) * width
+    edges = list(range(lower, upper + 1, width))
+    counts = pd.cut(values, bins=edges, right=False).value_counts(sort=False)
+    return pd.DataFrame({
+        "기온 구간": [f"{left}℃ 이상 ~ {right}℃ 미만" for left, right in zip(edges, edges[1:])],
+        "구간 중심": [(left + right) / 2 for left, right in zip(edges, edges[1:])],
+        "일수": counts.to_numpy(),
+        "비율 (%)": counts.to_numpy() / len(values) * 100,
+    })
 
 
 def main():
-    st.set_page_config(page_title="서울의 100년 기온 변화", page_icon="🌡️", layout="wide")
-    st.title("서울의 100년 기온 변화")
-    st.write("해마다 달라지는 기온과 긴 시간에 걸친 변화를 함께 살펴보세요.")
+    st.set_page_config(page_title="서울 일별 평균기온 분포", page_icon="🌡️", layout="wide")
+    st.title("서울 일별 평균기온 분포")
+    st.write("어느 기온 구간에 관측일이 많이 모여 있을까요? 막대가 높을수록 해당 기온의 날이 많습니다.")
     try:
         with st.spinner("서울 기온 데이터를 읽고 있습니다…"):
             daily = load_data()
-            annual = annual_data(daily)
     except Exception as exc:
         st.error("데이터를 불러오지 못했습니다. 잠시 후 다시 시도하거나 main.py 옆에 seoul.csv를 넣어 주세요.")
         with st.expander("오류 상세"):
             st.text(str(exc))
         st.stop()
 
-    valid = annual.dropna(subset=["연평균 기온"])
-    if valid.empty:
-        st.warning("한 해의 모든 날짜에 평균기온이 있는 연도가 없어 그래프를 만들 수 없습니다.")
+    first_year = int(daily["날짜"].dt.year.min())
+    last_year = int(daily["날짜"].dt.year.max())
+    if first_year < last_year:
+        start, end = st.slider("분석 기간 (연도)", first_year, last_year, (first_year, last_year))
+    else:
+        start = end = first_year
+    width = st.select_slider("기온 구간 너비 (℃)", options=[1, 2, 3, 5, 10], value=2)
+    selected = daily.loc[daily["날짜"].dt.year.between(start, end)]
+    values = selected["평균기온"].replace([float("inf"), float("-inf")], float("nan")).dropna()
+    if values.empty:
+        st.warning("선택한 기간에 유효한 일별 평균기온이 없습니다. 분석 기간을 바꿔 주세요.")
         st.stop()
-    end = int(valid.index.max())
-    start = max(int(annual.index.min()), end - 99)
-    mode = st.radio("표시 기간", ["최근 100년", "전체 기록"], horizontal=True)
-    shown = annual.loc[start:end].copy() if mode == "최근 100년" else annual.copy()
+    counts = histogram_data(values, width)
     st.caption(
-        f"원본 날짜 범위: {daily['날짜'].min():%Y-%m-%d} ~ {daily['날짜'].max():%Y-%m-%d} · "
-        f"표시 기간: {shown.index.min()}~{shown.index.max()}년"
+        f"선택 기간 내 기록: {selected['날짜'].min():%Y-%m-%d} ~ {selected['날짜'].max():%Y-%m-%d} · "
+        f"기온 구간 너비: {width}℃"
     )
-    if mode == "최근 100년" and end - start + 1 < 100:
-        st.info("자료 기간이 100년보다 짧아 확인 가능한 기간만 표시합니다.")
-
-    usable = shown.dropna(subset=["연평균 기온"])
-    first, last = usable.iloc[0], usable.iloc[-1]
     col1, col2, col3 = st.columns(3)
-    col1.metric(f"첫 유효 연도 · {usable.index[0]}년", f"{first['연평균 기온']:.2f} °C")
-    col2.metric(f"마지막 유효 연도 · {usable.index[-1]}년", f"{last['연평균 기온']:.2f} °C")
-    col3.metric("두 연도의 기온 차이", f"{last['연평균 기온'] - first['연평균 기온']:+.2f} °C")
-    st.caption("기온 차이는 두 개별 연도의 비교이며, 장기 추세의 추정값은 아닙니다.")
+    col1.metric("분석에 사용한 관측일", f"{len(values):,}일")
+    col2.metric("일별 평균기온의 평균", f"{values.mean():.2f} ℃")
+    col3.metric("일별 평균기온의 중앙값", f"{values.median():.2f} ℃")
 
-    fig = go.Figure()
-    for name, color, width in [("연평균 기온", "#4F8CC9", 1.7), ("10년 이동평균", "#E4572E", 3.5)]:
-        fig.add_trace(go.Scatter(
-            x=shown.index, y=shown[name], name=name,
-            mode="lines+markers" if name == "연평균 기온" else "lines",
-            line=dict(color=color, width=width), marker=dict(size=4), connectgaps=False,
-            hovertemplate="%{x}년<br>%{y:.2f} °C<extra>" + name + "</extra>",
-        ))
+    # 직접 집계한 동일 너비 구간을 붙여 그려 경계와 일수를 정확히 표시한다.
+    fig = go.Figure(go.Bar(
+        x=counts["구간 중심"], y=counts["일수"], width=width,
+        customdata=counts[["기온 구간", "비율 (%)"]].to_numpy(),
+        marker=dict(color="#4F8CC9", line=dict(color="white", width=1)),
+        hovertemplate="%{customdata[0]}<br>%{y:,}일 · %{customdata[1]:.2f}%<extra></extra>",
+        name="관측 일수",
+    ))
     fig.update_layout(
-        height=520, xaxis_title="연도", yaxis_title="기온 (°C)",
+        height=520, xaxis_title="일별 평균기온 (℃)", yaxis_title="관측 일수 (일)",
         template="plotly_white", font=dict(family="sans-serif"),
-        legend=dict(orientation="h", y=1.12, x=0),
-        margin=dict(l=30, r=20, t=45, b=30), hovermode="x unified",
+        margin=dict(l=30, r=20, t=25, b=30), bargap=0, showlegend=False,
     )
-    fig.update_xaxes(tickformat="d")
+    fig.update_yaxes(rangemode="tozero", tickformat=",d")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    missing = int((~shown["완전한 연도"]).sum())
-    if missing:
-        st.info(f"관측일이 부족하거나 자료가 없는 {missing}개 연도는 계산에서 제외하고 선을 끊어 표시했습니다.")
-    with st.expander("계산 방법과 연도별 자료"):
+
+    peaks = counts.loc[counts["일수"].eq(counts["일수"].max())]
+    peak_labels = ", ".join(peaks["기온 구간"])
+    st.info(f"가장 많은 구간: {peak_labels} · 구간당 {int(peaks.iloc[0]['일수']):,}일 ({peaks.iloc[0]['비율 (%)']:.2f}%)")
+    excluded = len(selected) - len(values)
+    st.caption(
+        f"평균기온이 없거나 유효하지 않은 {excluded:,}개 행은 제외했습니다. "
+        "자료에 날짜 자체가 없는 날도 집계하지 않습니다. "
+        "일부 날짜만 있는 연도도 유효한 관측일은 포함하므로, 이 분포는 확보된 관측자료의 분포입니다."
+    )
+    with st.expander("집계 방법과 구간별 일수"):
         st.write(
-            "서울 지점(108)의 일별 평균기온을 연도별로 산술평균합니다. "
-            "평균기온이 365일(윤년 366일) 모두 있는 해만 사용하며, 결측값을 0으로 바꾸거나 보간하지 않습니다. "
-            "10년 이동평균은 해당 연도와 직전 9년의 연평균을 평균한 값으로, 10개 연도가 모두 유효할 때만 표시합니다. "
-            "최근 100년은 마지막 완전한 연도와 그 이전 99개 달력 연도입니다. 원본의 최신 연도가 현재 연도와 다를 수 있습니다."
+            "서울 지점(108)의 일별 평균기온을 사용합니다. 각 구간은 하한을 포함하고 상한을 제외합니다. "
+            "예를 들어 0℃ 이상 ~ 2℃ 미만 구간에는 0℃가 포함되고, 2℃는 다음 구간에 포함됩니다. "
+            "비율은 해당 구간 일수를 선택 기간의 유효 관측일 수로 나눈 값입니다. "
+            "이 히스토그램은 계절과 여러 연도가 섞인 기온 분포를 보여 주며, 시간에 따른 변화는 나타내지 않습니다."
         )
-        st.dataframe(shown.reset_index(), hide_index=True, use_container_width=True)
-        st.download_button("연도별 자료 내려받기", shown.to_csv().encode("utf-8-sig"),
-                           file_name="서울_연평균_기온.csv", mime="text/csv")
+        table = counts.drop(columns="구간 중심")
+        st.dataframe(table, hide_index=True, use_container_width=True)
+        st.download_button("구간별 자료 내려받기", table.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="서울_일별_평균기온_분포.csv", mime="text/csv")
     st.markdown(f"[원본 데이터 확인]({DATA_URL})")
 
 
