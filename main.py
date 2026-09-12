@@ -85,14 +85,17 @@ def expand_school_name(query):
 
 
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=512)
-def search_schools(query):
+def search_schools(query, office="", kind=""):
     query = query.strip()
-    rows, total = request_rows("schoolInfo", SCHUL_NM=query)
+    filters = {"ATPT_OFCDC_SC_CODE": office} if office else {}
+    if kind:
+        filters["SCHUL_KND_SC_NM"] = kind
+    rows, total = request_rows("schoolInfo", SCHUL_NM=query, **filters)
     used_query = query
     if not rows:
         expanded = expand_school_name(query)
         if expanded != query:
-            rows, total = request_rows("schoolInfo", SCHUL_NM=expanded)
+            rows, total = request_rows("schoolInfo", SCHUL_NM=expanded, **filters)
             used_query = expanded
     schools = []
     for row in rows:
@@ -102,6 +105,8 @@ def search_schools(query):
             "id": f'{row["ATPT_OFCDC_SC_CODE"]}:{row["SD_SCHUL_CODE"]}',
             "name": row["SCHUL_NM"], "region": row.get("LCTN_SC_NM", "지역 미제공"),
             "office": row["ATPT_OFCDC_SC_CODE"], "code": row["SD_SCHUL_CODE"],
+            "kind": row.get("SCHUL_KND_SC_NM", ""),
+            "address": row.get("ORG_RDNMA", ""),
         })
     return schools, total, used_query
 
@@ -195,25 +200,48 @@ dialog{padding:0;border:1px solid #d5dfd1;border-radius:24px;background:var(--pa
 @media(max-width:720px){.cards{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 14px 14px}.day{padding:9px;min-height:82px}.day .num{font-size:16px}.day .status{font-size:10px}.todayLabel{position:static;font-size:9px}.calendar,.week{gap:4px}.heading h2{font-size:26px}.tag{display:none}}
 @media(max-width:450px){.cards{grid-template-columns:1fr}.day .status{font-size:9px}.day{min-height:88px;padding:7px}.arena{height:170px}.team{padding:12px 7px}.heading .hint{font-size:11px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition:none!important}.cover.gold{box-shadow:0 0 18px #e9ba4e99}}
+
+.dish{perspective:900px;transform-style:preserve-3d;min-height:66px;background:#fffefb}
+.cover{backface-visibility:hidden;transform-origin:center;transition:background .16s,box-shadow .16s}
+.cover.opening{animation:rumble .42s ease-in-out both!important}
+.cover.flipping{animation:flipFront .4s cubic-bezier(.3,.1,.4,1) forwards!important;pointer-events:none}
+.dish.flipping .dishName{visibility:visible;animation:flipBack .4s cubic-bezier(.3,.1,.4,1) both}
+.dish.golden.revealed{border-color:#dbb34d;background:#fffbec;box-shadow:0 0 12px #f0ce762b}
+.dishName{backface-visibility:hidden}
+@keyframes rumble{0%,100%{transform:translateX(0) rotateZ(0)}15%,55%{transform:translateX(-5px) rotateZ(-2deg)}35%,75%{transform:translateX(5px) rotateZ(2deg)}}
+@keyframes flipFront{from{transform:rotateY(0);opacity:1}49%{opacity:1}50%{opacity:0}100%{transform:rotateY(-180deg);opacity:0}}
+@keyframes flipBack{0%{transform:rotateY(180deg);opacity:0}49%{opacity:0}50%{opacity:1}100%{transform:rotateY(0);opacity:1}}
+body.compare .calendar,body.compare .week,body.compare .legend{display:none}
+body.compare dialog{position:static;display:block;width:100%;max-height:none;max-width:none;margin:0;overflow:visible;box-shadow:none;border:0}
+body.compare .dialogHead{display:none}body.compare .cards{padding:0 4px 24px}
+body.compare .dialogHint{padding:0 4px}
+body.single .arena{display:none}body.single .cards{grid-template-columns:1fr;max-width:650px;margin:auto}
+body.single dialog{width:min(690px,96vw)}
+.replay{display:block;margin:-12px auto 22px;background:white;color:var(--green);border:1px solid var(--line);border-radius:30px;padding:8px 18px;font-size:12px}
 </style></head><body>
 <section class="arena" id="arena" aria-label="선택한 학교"><div class="teams" id="teams"></div><span class="impact" aria-hidden="true">💥</span></section>
 <div class="heading"><div><div class="eyebrow">SCHOOL LUNCH CLUB</div><h2 id="monthTitle"></h2><div class="hint">궁금한 날짜를 누르고, 오늘의 메뉴 상자를 열어 보세요.</div></div><span class="tag">🍱 중식 · 한국 시간 기준</span></div>
 <div class="week" aria-hidden="true"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
 <div class="calendar" id="calendar" aria-label="급식 달력"></div>
-<p class="legend">🟢 기준 학교 · 🟠 비교 학교 &nbsp; | &nbsp; 점은 급식 정보가 있는 학교를 뜻해요.<br>✨ 황금 상자: 10 돼지고기 · 15 닭고기 · 16 쇠고기 중 하나 이상이 표시된 메뉴</p>
-<dialog id="detail" aria-labelledby="detailTitle"><div class="dialogHead"><h2 id="detailTitle"></h2><button class="close" id="close" aria-label="달력으로 돌아가기">×</button></div><p class="dialogHint">상자를 하나씩 누르면 흔들린 뒤 메뉴가 나타나요. 알레르기 정보는 각 학교의 아래쪽에서 확인하세요.</p><div class="cards" id="cards"></div></dialog>
+<p class="legend">🟢 기준 학교 · 🟠 비교 학교 &nbsp; | &nbsp; 점은 급식 정보가 있는 학교를 뜻해요.<br>상자를 열면 10 돼지고기 · 15 닭고기 · 16 쇠고기 표기가 있는 메뉴는 금빛으로 변해요.</p>
+<dialog id="detail" aria-labelledby="detailTitle"><div class="dialogHead"><h2 id="detailTitle"></h2><button class="close" id="close" aria-label="달력으로 돌아가기">×</button></div><p class="dialogHint">상자를 누르면 색이 변하고, 흔들린 뒤 카드처럼 뒤집혀 메뉴가 나타나요. 알레르기 정보는 각 학교의 아래쪽에서 확인하세요.</p><div class="cards" id="cards"></div></dialog>
 <script>
 const DATA = __PAYLOAD__;
 const $ = id => document.getElementById(id);
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 function node(tag, cls, text) {const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
+const comparing=DATA.mode==='compare';
+document.body.classList.add(comparing?'compare':'single');
 const teams=$('teams');
 const base=node('div','team base');base.append(node('small','','기준 학교'),node('strong','',DATA.schools[0].name));teams.append(base,node('div','vs',DATA.schools.length>1?'VS':'🍱'));
 const opponents=node('div','opponents');
 DATA.schools.slice(1).forEach((s,i)=>{const card=node('div','team');card.append(node('small','',`비교 학교 ${i+1}`),node('strong','',s.name));opponents.append(card);});
 if(DATA.schools.length===1)opponents.append(node('div','hint','비교 학교를 추가해 함께 살펴보세요.'));
-teams.append(opponents);if(DATA.animate)$('arena').classList.add('battle');
-$('monthTitle').textContent=`${DATA.year}년 ${DATA.month}월`;
+teams.append(opponents);if(DATA.animate&&comparing)$('arena').classList.add('battle');
+if(comparing&&DATA.schools.length>1){const replay=node('button','replay','↻ VS 다시 보기');replay.onclick=()=>{$('arena').classList.remove('battle');void $('arena').offsetWidth;$('arena').classList.add('battle');};$('arena').after(replay);}
+if(!comparing)document.querySelector('.legend').textContent='점이 표시된 날에는 급식 정보가 있어요. 날짜를 눌러 메뉴 상자를 열어 보세요.';
+$('monthTitle').textContent=comparing?`${DATA.month}월 ${Number(DATA.selected.slice(-2))}일 · 급식 VS`:`${DATA.year}년 ${DATA.month}월`;
+if(comparing)document.querySelector('.heading .hint').textContent='같은 날짜, 다른 학교의 점심. 상자를 열어 비교해 보세요.';
 const grid=$('calendar'), dialog=$('detail');let activeButton=null;
 const offset=new Date(DATA.year,DATA.month-1,1).getDay();
 for(let i=0;i<offset;i++)grid.append(node('div','empty'));
@@ -233,12 +261,12 @@ dateKeys.forEach(ymd=>{
 });
 while(grid.children.length%7)grid.append(node('div','empty'));
 function openDay(ymd,btn){
- activeButton=btn;grid.querySelectorAll('.selected').forEach(el=>el.classList.remove('selected'));btn.classList.add('selected');
- const origin=btn.getBoundingClientRect();$('detailTitle').textContent=`${DATA.month}월 ${Number(ymd.slice(-2))}일의 점심`;
+ activeButton=btn;grid.querySelectorAll('.selected').forEach(el=>el.classList.remove('selected'));if(btn)btn.classList.add('selected');
+ const origin=btn?btn.getBoundingClientRect():null;$('detailTitle').textContent=`${DATA.month}월 ${Number(ymd.slice(-2))}일의 점심`;
  const cards=$('cards');cards.replaceChildren();cards.style.setProperty('--count',DATA.schools.length);
  DATA.schools.forEach((school,index)=>{
   const meal=DATA.days[ymd][school.id], card=node('section','mealCard'), head=node('div','schoolHead');
-  head.append(node('small','',index===0?'기준 학교':`비교 학교 ${index}`),node('h3','',school.name),node('small','',school.region));card.append(head);
+  head.append(node('small','',index===0?(comparing?'기준 학교':'선택 학교'):`비교 학교 ${index}`),node('h3','',school.name),node('small','',school.region));card.append(head);
   if(meal.status!=='ok'){card.append(node('p','message',meal.status==='error'?meal.message:'이날은 등록된 중식 정보가 없어요.'));cards.append(card);return;}
   const list=node('ul','menuList'), allNumbers=new Set();
   meal.entries.forEach((entry,entryIndex)=>{
@@ -248,11 +276,19 @@ function openDay(ymd,btn){
     item.allergens.forEach(n=>allNumbers.add(n));
     const li=node('li','dish'), name=node('div','dishName',item.name);name.setAttribute('aria-hidden','true');
     if(item.allergens.length)name.append(node('small','',`알레르기 ${item.allergens.join(', ')}`));
-    const cover=node('button',`cover${item.gold?' gold':''}`,`${item.gold?'✨':'📦'} 메뉴 ${i+1} 열기`);cover.type='button';
-    cover.setAttribute('aria-label',`${school.name} 메뉴 ${i+1} 공개${item.gold?', 황금 상자':''}`);
+    // 열기 전에는 색, 아이콘, 접근성 이름까지 모두 동일하다.
+    const cover=node('button','cover',`📦 메뉴 ${i+1} 열기`);cover.type='button';
+    cover.setAttribute('aria-label',`${school.name} 메뉴 ${i+1} 공개`);
     cover.addEventListener('click',()=>{
-     cover.disabled=true;cover.classList.add('opening');
-     setTimeout(()=>{cover.remove();li.classList.add('revealed');name.removeAttribute('aria-hidden');name.setAttribute('role','status');li.tabIndex=-1;li.focus({preventScroll:true});},reduced?0:490);
+     cover.disabled=true;
+     const finish=()=>{cover.remove();li.classList.remove('flipping');li.classList.add('revealed');name.removeAttribute('aria-hidden');name.setAttribute('role','status');if(dialog.open){li.tabIndex=-1;li.focus({preventScroll:true});}};
+     if(item.gold){cover.classList.add('gold');li.classList.add('golden');cover.textContent='✨ 두근두근!';}
+     else cover.textContent='📦 두근두근!';
+     if(reduced){finish();return;}
+     // 색 변화 → 진동 → 앞면/뒷면 회전 → 메뉴 공개 (약 1초).
+     setTimeout(()=>cover.classList.add('opening'),160);
+     setTimeout(()=>{cover.classList.remove('opening');cover.classList.add('flipping');li.classList.add('flipping');},580);
+     setTimeout(finish,1000);
     },{once:true});
     li.append(name,cover);list.append(li);
    });
@@ -265,6 +301,7 @@ function openDay(ymd,btn){
   if(meal.partial)allergy.append(node('p','','이날 식단이 5건을 초과해 일부 정보만 표시됩니다.'));
   card.append(allergy);cards.append(card);
  });
+ if(comparing){dialog.setAttribute('open','');return;}
  dialog.showModal();dialog.scrollTop=0;
  if(!reduced){const end=dialog.getBoundingClientRect();dialog.animate([
   {transform:`translate(${origin.left+origin.width/2-end.left-end.width/2}px,${origin.top+origin.height/2-end.top-end.height/2}px) scale(${origin.width/end.width},${origin.height/end.height})`,opacity:.4},
@@ -274,14 +311,15 @@ function openDay(ymd,btn){
 $('close').onclick=()=>dialog.close();
 dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
 dialog.addEventListener('close',()=>activeButton?.focus({preventScroll:true}));
+if(comparing)openDay(DATA.selected,null);
 </script></body></html>'''
 
 
-def render_calendar(schools, data, selected, animate):
+def render_calendar(schools, data, selected, animate=False, mode="calendar"):
     payload = {"schools": schools, "days": data, "year": selected.year,
                "month": selected.month, "selected": selected.strftime("%Y%m%d"),
                "today": korea_today().strftime("%Y%m%d"), "allergens": ALLERGENS,
-               "animate": animate}
+               "animate": animate, "mode": mode}
     # 외부 문자열은 JSON으로만 전달하고 script 종료 태그 삽입을 차단한다.
     safe_json = (json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
                  .replace(">", "\\u003e").replace("&", "\\u0026")
@@ -289,78 +327,182 @@ def render_calendar(schools, data, selected, animate):
     components.html(HTML_TEMPLATE.replace("__PAYLOAD__", safe_json), height=1060, scrolling=True)
 
 
+# 시도교육청 코드. 초기 학교의 소재지는 학교알리미에서 확인한 인천광역시.
+REGIONS = {
+    "서울특별시": "B10", "부산광역시": "C10", "대구광역시": "D10",
+    "인천광역시": "E10", "광주광역시": "F10", "대전광역시": "G10",
+    "울산광역시": "H10", "세종특별자치시": "I10", "경기도": "J10",
+    "강원특별자치도": "K10", "충청북도": "M10", "충청남도": "N10",
+    "전북특별자치도": "P10", "전라남도": "Q10", "경상북도": "R10",
+    "경상남도": "S10", "제주특별자치도": "T10",
+}
+
+
+def remember(widget_key, stored_key):
+    st.session_state[stored_key] = st.session_state[widget_key]
+
+
+def saved_select(label, options, key, default=None, **kwargs):
+    """다른 페이지를 다녀와도 선택이 유지되도록 위젯 값과 보관 값을 분리한다."""
+    value = st.session_state.get(key, default)
+    if value not in options:
+        value = default if default in options else None
+    widget_key = "_widget_" + key
+    st.session_state[widget_key] = value
+    return st.selectbox(label, options, index=None, key=widget_key,
+                        on_change=remember, args=(widget_key, key), **kwargs)
+
+
+def ensure_default_school():
+    if st.session_state.get("default_school_id"):
+        return
+    try:
+        schools, _, _ = search_schools("도림고등학교", "E10", "고등학교")
+        exact = [school for school in schools if school["name"] == "도림고등학교"]
+        if exact:
+            school = exact[0]
+            st.session_state.school_registry[school["id"]] = school
+            st.session_state.default_school_id = school["id"]
+        else:
+            st.sidebar.info("도림고등학교 정보를 찾지 못했어요. 아래에서 다른 학교를 선택해 주세요.")
+    except NeisError:
+        st.sidebar.info("초기 학교인 도림고등학교 정보를 가져오지 못했어요. 잠시 후 다시 시도해 주세요.")
+
+
+def school_picker(prefix, title, default_school=False, excluded=()):
+    st.markdown(f"**{title}**")
+    region = saved_select("지역", list(REGIONS), prefix + "_region", "인천광역시")
+    kind = saved_select("학교급", ["고등학교", "중학교", "초등학교", "특수학교", "전체"],
+                        prefix + "_kind", "고등학교")
+    if region is None or kind is None:
+        return None
+    # 입력 없이 지역별 목록을 즉시 채운다. 검색은 목록에 없는 학교를 찾을 때만 사용.
+    query = st.text_input("학교명으로 목록 좁히기 (선택)", key=prefix + "_query",
+                          placeholder="입력하지 않아도 아래에서 선택 가능")
+    office = REGIONS[region]
+    try:
+        found, total, used = search_schools(query, office, "" if kind == "전체" else kind)
+        for school in found:
+            st.session_state.school_registry[school["id"]] = school
+        if query.strip() and used != query.strip():
+            st.caption(f"‘{used}’로 다시 찾았어요.")
+        if not found:
+            st.info("해당 조건에 맞는 학교를 찾지 못했어요.")
+        elif total > len(found) or len(found) == 5:
+            st.caption("무인증 목록은 한 번에 5개까지 제공돼요. 원하는 학교가 없으면 이름을 입력해 주세요.")
+    except NeisError as exc:
+        st.info(str(exc))
+        found = []
+    registry = st.session_state.school_registry
+    # 이미 찾은 학교도 지역/학교급별로 함께 제공하며 초기 도림고를 목록에 포함한다.
+    options = {school["id"]: school for school in registry.values()
+               if school["office"] == office and school["id"] not in excluded
+               and (kind == "전체" or school.get("kind") == kind
+                    or (not school.get("kind") and school["name"].endswith(kind)))}
+    if query.strip():
+        needle = expand_school_name(query)
+        found_ids = {school["id"] for school in found}
+        options = {sid: school for sid, school in options.items()
+                   if sid in found_ids or needle in school["name"]}
+    ordered = sorted(options, key=lambda sid: (options[sid]["name"], sid))
+    default = st.session_state.get("default_school_id") if default_school else None
+    chosen = saved_select("학교명", ordered, prefix + "_school", default,
+                          format_func=lambda sid: options[sid]["name"] +
+                          (" · " + options[sid]["address"] if options[sid].get("address") else ""),
+                          placeholder="학교를 선택하세요", disabled=not ordered)
+    if chosen:
+        st.session_state[prefix + "_school"] = chosen
+    else:
+        st.session_state[prefix + "_school"] = None
+    return registry.get(chosen)
+
+
+def date_picker(key, label):
+    widget_key = "_widget_" + key
+    st.session_state[widget_key] = st.session_state.get(key, korea_today())
+    return st.date_input(label, key=widget_key, min_value=date(2000, 1, 1),
+                         max_value=date(2100, 12, 31), format="YYYY-MM-DD",
+                         on_change=remember, args=(widget_key, key))
+
+
+def calendar_page():
+    with st.sidebar:
+        school = school_picker("calendar", "🍱 달력으로 볼 학교", default_school=True)
+        st.divider()
+        selected = date_picker("calendar_date", "조회 날짜 · 해당 월 표시")
+    st.subheader("달력 확인")
+    st.write("한 학교의 한 달 점심을 살펴보세요. 날짜를 누르면 메뉴 상자가 펼쳐집니다.")
+    if not school:
+        st.info("왼쪽에서 지역과 학교를 선택해 주세요.")
+        return
+    data = load_month([school], selected.year, selected.month)
+    show_failures(data)
+    render_calendar([school], data, selected)
+
+
+def show_failures(data):
+    if any(meal["status"] == "error" for day in data.values() for meal in day.values()):
+        st.info("일부 급식을 가져오지 못했어요. 잠시 후 다시 조회해 주세요.")
+        if st.button("조회 다시 시도"):
+            st.rerun()
+
+
+def compare_page():
+    with st.sidebar:
+        base = school_picker("compare_base", "🟢 기준 학교", default_school=True)
+        st.divider()
+        count = saved_select("비교 학교 수", [1, 2, 3], "comparison_count", 1)
+        comparisons = []
+        used = [base["id"]] if base else []
+        for i in range(count or 1):
+            with st.expander(f"🟠 비교 학교 {i + 1}", expanded=True):
+                school = school_picker(f"compare_{i}", f"비교 학교 {i + 1}", excluded=used)
+                if school:
+                    comparisons.append(school)
+                    used.append(school["id"])
+        st.divider()
+        selected = date_picker("compare_date", "비교 날짜")
+    st.subheader("학교 비교")
+    st.write("기준 학교는 왼쪽에서, 비교 학교는 오른쪽에서 등장해요. 같은 날의 메뉴를 열어 비교해 보세요.")
+    if not base or not comparisons:
+        st.info("왼쪽에서 기준 학교 1개와 비교 학교를 선택해 주세요. 비교 학교는 최대 3개까지 가능해요.")
+        return
+    schools = [base, *comparisons]
+    ymd = selected.strftime("%Y%m%d")
+    data = {ymd: {}}
+    # 비교 페이지는 하루만 조회: 31~124번 대신 2~4번 요청.
+    with st.spinner("선택한 날짜의 급식을 가져오고 있어요…"):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            jobs = {pool.submit(fetch_day, s["office"], s["code"], ymd): s["id"] for s in schools}
+            for future in as_completed(jobs):
+                sid = jobs[future]
+                try:
+                    data[ymd][sid] = future.result()
+                except NeisError as exc:
+                    data[ymd][sid] = {"status": "error", "message": str(exc), "entries": []}
+    show_failures(data)
+    render_calendar(schools, data, selected, animate=True, mode="compare")
+
+
 def main():
-    st.set_page_config(page_title="학교 급식 찾아보기", page_icon="🍱", layout="wide")
+    st.set_page_config(page_title="학교 급식 찾아보기", page_icon="🍱", layout="wide",
+                       initial_sidebar_state="expanded")
     st.markdown("""<style>
     .stApp{background:#fffdf7;color:#193d32}
-    .block-container{max-width:1280px;padding-top:2.5rem}
-    h1{letter-spacing:-1.5px}div[data-testid="stForm"]{background:#f1f4ea;border-radius:18px}
+    .block-container{max-width:1280px;padding-top:2rem}
+    h1{letter-spacing:-1.5px}
+    [data-testid="stSidebar"]{background:#eef3e8}
     </style>""", unsafe_allow_html=True)
     st.caption("🍱  SCHOOL LUNCH CLUB")
     st.title("학교 급식 찾아보기")
-    st.write("우리 학교의 점심, 다른 학교와 함께 열어 볼까요?")
     st.session_state.setdefault("school_registry", {})
-    st.session_state.setdefault("comparisons", [])
-    st.session_state.setdefault("view_date", korea_today())
-    with st.form("school_search"):
-        query = st.text_input("학교 이름", placeholder="예: 수도여고, 경기고, 서울교육대학교부설초등학교")
-        submitted = st.form_submit_button("🔎 학교 찾기")
-    if submitted:
-        if not query.strip():
-            st.info("검색할 학교 이름을 입력해 주세요.")
-        else:
-            try:
-                with st.spinner("학교를 찾고 있어요…"):
-                    found, total, used = search_schools(query)
-                if used != query.strip():
-                    st.info(f"‘{query.strip()}’의 검색 결과가 없어 ‘{used}’로 다시 검색했어요.")
-                for school in found:
-                    st.session_state.school_registry[school["id"]] = school
-                if not found:
-                    st.info("학교를 찾지 못했어요. 학교의 정식 이름이나 더 구체적인 이름으로 검색해 주세요.")
-                else:
-                    st.success(f"{len(found)}개 학교를 찾았어요. 아래에서 기준 학교와 비교 학교를 선택해 주세요.")
-                    if total > len(found) or len(found) >= 5:
-                        st.caption("인증키 없는 검색은 최대 5개 학교가 표시돼요. 원하는 학교가 없다면 이름을 더 자세히 입력해 주세요.")
-            except NeisError as exc:
-                st.info(str(exc))
-    registry = st.session_state.school_registry
-    if not registry:
-        st.info("학교를 검색하면 기준 학교 1개와 비교 학교 최대 3개를 선택할 수 있어요.")
-        return
-
-    def school_label(school_id):
-        school = registry[school_id]
-        return f'{school["name"]} · {school["region"]} ({school["code"]})'
-
-    left, right = st.columns([1, 2])
-    with left:
-        base = st.selectbox("기준 학교 · 1개", list(registry), index=None,
-                            format_func=school_label, placeholder="기준 학교를 선택하세요", key="base_school")
-    # 기준 학교로 바꾼 학교가 기존 비교 목록에 있으면 중복을 제거한다.
-    st.session_state.comparisons = [sid for sid in st.session_state.comparisons if sid != base and sid in registry]
-    with right:
-        comparisons = st.multiselect("비교 학교 · 최대 3개", [sid for sid in registry if sid != base],
-                                     format_func=school_label, max_selections=3, key="comparisons",
-                                     placeholder="다른 학교를 추가로 검색해 선택하세요")
-    st.caption("다른 학교를 추가 검색해도 선택한 학교는 유지됩니다.")
-    selected = st.date_input("조회할 날짜 · 해당 월의 달력을 표시해요", key="view_date",
-                             min_value=date(2000, 1, 1), max_value=date(2100, 12, 31), format="YYYY-MM-DD")
-    if not base:
-        st.info("기준 학교를 하나 선택해 주세요.")
-        return
-    schools = [registry[sid] for sid in [base, *comparisons]]
-    signature = (base, *comparisons)
-    animate = st.session_state.get("last_school_selection") != signature
-    data = load_month(schools, selected.year, selected.month)
-    failures = sum(value["status"] == "error" for day in data.values() for value in day.values())
-    if failures:
-        st.info("일부 날짜의 정보를 가져오지 못했어요. 해당 날짜 칸에서 안내를 확인하고 다시 조회해 주세요.")
-        if st.button("가져오지 못한 급식 다시 조회"):
-            st.rerun()
-    render_calendar(schools, data, selected, animate)
-    st.session_state.last_school_selection = signature
-    st.caption("자료: 나이스 교육정보 개방 포털 · 중식 기준 · 급식 정보는 30분 동안 캐시됩니다.")
+    ensure_default_school()
+    navigation = st.navigation([
+        st.Page(calendar_page, title="달력 확인", icon="📅", default=True),
+        st.Page(compare_page, title="학교 비교", icon="⚔️", url_path="compare"),
+    ])
+    navigation.run()
+    st.caption("자료: 나이스 교육정보 개방 포털 · 중식 기준 · 한국 시간 기준 · 급식 정보 30분 캐시")
 
 
 if __name__ == "__main__":
