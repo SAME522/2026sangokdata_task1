@@ -217,16 +217,13 @@ def main() -> None:
             st.info("영화가 10편 이상이며 유효한 관객 데이터가 있는 장르가 없습니다.")
         else:
             audience_limit = 5_000_000
-            above_limit = box_data[box_data["total_audi"] > audience_limit]
-            show_full_range = st.checkbox(
-                "전체 범위 보기 — 500만 명 초과 영화 포함",
-                value=False, key="box_full_range",
+            above_limit = box_data[box_data["total_audi"] >= audience_limit]
+            st.caption(
+                "세로축의 마지막 눈금 ‘5M 이상’은 500만 명 이상의 모든 값을 나타냅니다. "
+                "8M, 10M인 영화도 이 상한선의 ◆에 표시합니다. "
+                "마우스를 올리면 영화명과 실제 총 관객수가 보입니다. "
+                "같은 장르의 영화가 겹치면 툴팁에 함께 표시합니다."
             )
-            if not show_full_range:
-                st.caption(
-                    f"세로축은 0~500만 명입니다. 범위 밖 영화 {len(above_limit)}편은 "
-                    "‘전체 범위 보기’를 눌러 확인하세요. 상자와 중앙값은 전체 데이터를 기준으로 계산합니다."
-                )
             fig = px.box(
                 box_data, x="genre", y="total_audi", color="genre",
                 points="outliers", hover_name="movieNm",
@@ -234,14 +231,35 @@ def main() -> None:
                 category_orders={"genre": eligible},
             )
             fig.update_layout(showlegend=False)
-            # 데이터는 유지하고 표시 범위만 조절하여 상자 통계가 바뀌지 않게 합니다.
-            if show_full_range:
-                fig.update_yaxes(autorange=True, rangemode="tozero")
-            else:
-                fig.update_yaxes(range=[0, audience_limit], autorange=False)
+            # 원래 값으로 상자 통계를 계산하고, 상한 이상의 영화만 별도 마커로 표시합니다.
+            fig.update_yaxes(
+                range=[0, audience_limit], autorange=False,
+                tickvals=[0, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000],
+                ticktext=["0", "1M", "2M", "3M", "4M", "5M 이상"],
+            )
+            fig.add_hline(y=audience_limit, line_dash="dot", line_color="#888888")
+            for genre, movies in above_limit.groupby("genre", sort=False):
+                movie_details = "<br>".join(
+                    f"{escape(str(row.movieNm))}: {row.total_audi:,.0f}명 ({row.total_audi / 1_000_000:.2f}M)"
+                    for row in movies.sort_values("total_audi", ascending=False).itertuples()
+                )
+                fig.add_trace(go.Scatter(
+                    x=[genre], y=[audience_limit], mode="markers",
+                    marker=dict(
+                        symbol="diamond", size=13, color=colors[genre],
+                        line=dict(color="white", width=1),
+                    ),
+                    # 상단 경계에서도 마커 전체가 보이고 마우스로 선택되도록 합니다.
+                    cliponaxis=False, showlegend=False,
+                    hovertext=[movie_details],
+                    hovertemplate=(
+                        "<b>%{x} · 500만 명 이상</b><br>%{hovertext}"
+                        "<br>표시 구간: 5M 이상 · 수치는 실제 총 관객<extra></extra>"
+                    ),
+                ))
             st.plotly_chart(
                 fig, use_container_width=True,
-                key=f"box_chart_{'full' if show_full_range else 'limited'}",
+                key="box_chart_5m_and_above",
             )
         show_insight("box_insight")
     st.divider()
@@ -278,3 +296,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
