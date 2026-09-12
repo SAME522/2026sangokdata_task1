@@ -76,22 +76,46 @@ def show_top_five(df):
     totals = df.groupby("영화코드")["일관객"].sum().sort_values(ascending=False, kind="stable").head(5)
     names = df.drop_duplicates("영화코드").set_index("영화코드")["영화명"]
     labels = {code: f"{names[code]} ({code})" for code in totals.index}
-    dates = pd.date_range(df["날짜"].min(), df["날짜"].max(), freq="D")
-    selected = df[df["영화코드"].isin(totals.index)]
-    index = pd.MultiIndex.from_product([totals.index, dates], names=["영화코드", "날짜"])
-    # 기록이 없는 날은 결측값으로 남겨 선을 끊습니다.
-    comparison = selected.groupby(["영화코드", "날짜"])["일관객"].sum().reindex(index).reset_index()
-    comparison["영화"] = comparison["영화코드"].map(labels)
-    fig = px.line(comparison, x="날짜", y="일관객", color="영화", markers=True,
-                  category_orders={"영화": list(labels.values())},
-                  labels={"일관객": "일관객 (명)"}, custom_data=["영화"])
-    fig.update_traces(connectgaps=False,
-                      hovertemplate="%{customdata[0]}<br>날짜: %{x|%Y-%m-%d}<br>관객수: %{y:,.0f}명<extra></extra>")
-    fig.update_layout(xaxis_tickformat="%Y-%m-%d", yaxis_tickformat=",",
+    axis_mode = st.radio(
+        "비교 기준", ["시작점 맞추기 (첫 기록일 = 0일)", "실제 날짜"],
+        horizontal=True, key="top_five_axis_mode",
+    )
+    aligned = axis_mode == "시작점 맞추기 (첫 기록일 = 0일)"
+    parts = []
+    for code in totals.index:
+        daily = df.loc[df["영화코드"] == code].groupby("날짜")["일관객"].sum().sort_index()
+        # 날짜 차이를 사용하므로 기록이 빠진 날도 경과일에 포함됩니다.
+        dates = pd.date_range(daily.index.min(), daily.index.max(), freq="D")
+        part = daily.reindex(dates).rename_axis("날짜").reset_index()
+        part["경과일"] = (part["날짜"] - daily.index.min()).dt.days
+        part["실제날짜"] = part["날짜"].dt.strftime("%Y-%m-%d")
+        part["영화"] = labels[code]
+        parts.append(part)
+    comparison = pd.concat(parts, ignore_index=True)
+    fig = px.line(
+        comparison, x="경과일" if aligned else "날짜", y="일관객", color="영화", markers=True,
+        category_orders={"영화": list(labels.values())},
+        labels={"일관객": "일관객 (명)", "경과일": "첫 기록일부터 경과일 (일)"},
+        custom_data=["영화", "실제날짜", "경과일"],
+    )
+    fig.update_traces(
+        connectgaps=False,
+        hovertemplate="%{customdata[0]}<br>날짜: %{customdata[1]}<br>첫 기록 후: %{customdata[2]}일<br>관객수: %{y:,.0f}명<extra></extra>",
+    )
+    fig.update_layout(yaxis_tickformat=",",
                       legend=dict(itemclick="toggle", itemdoubleclick="toggleothers"))
+    if aligned:
+        fig.update_xaxes(rangemode="tozero", tickformat="d")
+        fig.add_vline(x=0, line_dash="dot", line_color="gray")
+    else:
+        fig.update_xaxes(tickformat="%Y-%m-%d")
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("범례를 클릭하면 해당 영화를 켜거나 끌 수 있습니다. 선정 기준은 이 기간 10위권 기록의 일관객 합계이며, 기록이 없는 날은 0명으로 처리하지 않습니다.")
-    show_insight("기간 일관객 합계 상위 5편의 관객수 변화와 관객이 집중된 시기를 비교할 수 있다.")
+    st.caption("범례를 클릭하면 영화를 켜거나 끌 수 있습니다. 상위 5편은 전체 데이터 기간의 10위권 일관객 합계로 선정합니다. 기록이 없는 날은 0명으로 처리하지 않습니다.")
+    if aligned:
+        st.caption("0일은 각 영화가 이 데이터에 처음 기록된 날짜입니다. 개봉일과 다를 수 있으며, 세로축은 실제 일관객수를 유지합니다.")
+        show_insight("영화별 첫 기록일을 맞추면 관객수가 정점에 도달하는 시점과 이후 감소 흐름을 같은 경과일 기준으로 비교할 수 있다.")
+    else:
+        show_insight("기간 일관객 합계 상위 5편의 관객수 변화와 관객이 집중된 시기를 비교할 수 있다.")
 
 
 # ── 그래프 3: 날짜별 10위권 일관객 합계 ──────────────────────
