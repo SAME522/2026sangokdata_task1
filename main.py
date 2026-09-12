@@ -116,6 +116,58 @@ def show_daily_total(df):
     show_insight("날짜별 10위권 관객 규모의 흐름과 관객 합계가 가장 컸던 세 날짜를 확인할 수 있다.")
 
 
+# ── 그래프 4: 기간별 관객수 순위 및 TOP 10 ──────────────────
+def build_period_ranking(df, start, end):
+    selected = df.loc[df["날짜"].between(pd.Timestamp(start), pd.Timestamp(end)) & df["순위"].between(1, 10)]
+    ranking = selected.groupby("영화코드", as_index=False).agg(
+        영화명=("영화명", "first"), 관객수합계=("일관객", "sum"), 진입일수=("날짜", "nunique")
+    )
+    ranking = ranking.sort_values(["관객수합계", "영화명", "영화코드"], ascending=[False, True, True]).reset_index(drop=True)
+    ranking.insert(0, "순위", ranking["관객수합계"].rank(method="min", ascending=False).astype(int))
+    return ranking
+
+
+def show_period_ranking(df):
+    st.header("4. 기간별 관객수 순위 · TOP 10")
+    period = st.date_input(
+        "관객수 집계 기간",
+        value=(df["날짜"].min().date(), df["날짜"].max().date()),
+        min_value=df["날짜"].min().date(), max_value=df["날짜"].max().date(),
+        key="ranking_period",
+    )
+    if len(period) != 2:
+        st.info("집계 종료일도 선택해 주세요.")
+        return
+    ranking = build_period_ranking(df, period[0], period[1])
+    if ranking.empty:
+        st.info("선택한 기간에 기록된 영화가 없습니다.")
+        return
+    top = ranking.head(10).copy()
+    duplicated = top["영화명"].duplicated(keep=False)
+    top["영화"] = top["영화명"]
+    top.loc[duplicated, "영화"] = top.loc[duplicated, "영화명"] + " (" + top.loc[duplicated, "영화코드"] + ")"
+    fig = px.bar(
+        top, x="관객수합계", y="영화", orientation="h", text="관객수합계",
+        custom_data=["영화명", "진입일수", "순위"],
+        labels={"관객수합계": "기간 일관객 합계 (명)"},
+        title=f"{period[0]:%Y-%m-%d} ~ {period[1]:%Y-%m-%d} 관객수 TOP 10",
+    )
+    fig.update_traces(
+        texttemplate="%{x:,.0f}", textposition="auto",
+        hovertemplate="%{customdata[0]}<br>순위: %{customdata[2]}위<br>기간 관객수 합계: %{x:,.0f}명<br>기간 내 10위권 진입: %{customdata[1]}일<extra></extra>",
+    )
+    fig.update_layout(yaxis=dict(categoryorder="array", categoryarray=top["영화"].tolist(), autorange="reversed"),
+                      xaxis_tickformat=",", height=550)
+    st.plotly_chart(fig, use_container_width=True)
+    show_insight("선택한 기간의 일관객 합계가 많은 영화 10편과 각 영화의 10위권 진입 일수를 비교할 수 있다.")
+    st.caption("관객수는 선택 기간의 10위권 기록만 합산하며, 진입 일수도 해당 기간에 기록된 날짜 수입니다. 개봉 이후 전체 관객수나 전체 진입 일수를 뜻하지 않습니다. 동률은 공동 순위로 표시하며 TOP 10 경계에서는 영화명·영화코드순으로 선정합니다.")
+    with st.expander("전체 영화 관객수 순위표"):
+        st.dataframe(
+            ranking.rename(columns={"관객수합계": "기간 관객수 합계 (명)", "진입일수": "10위권 진입 일수"}),
+            hide_index=True, use_container_width=True,
+        )
+
+
 # ── 그래프 5: 월 × 요일 일관객 합계 ─────────────────────────
 def show_month_weekday(df):
     st.header("5. 월 × 요일 일관객 합계")
@@ -146,11 +198,11 @@ def main():
     with st.container():
         show_daily_audience(df)
     st.divider()
-    for render_graph in (show_top_five, show_daily_total, show_month_weekday):
+    for render_graph in (show_top_five, show_daily_total, show_period_ranking, show_month_weekday):
         with st.container():
             render_graph(df)
         st.divider()
-    # 4번 및 이후 그래프는 별도 함수로 정의하고 위 화면 구성에 추가하세요.
+    # 이후 그래프는 별도 함수로 정의하고 위 화면 구성에 추가하세요.
 
 if __name__ == "__main__":
     main()
