@@ -216,6 +216,17 @@ def main() -> None:
         if box_data.empty:
             st.info("영화가 10편 이상이며 유효한 관객 데이터가 있는 장르가 없습니다.")
         else:
+            audience_limit = 5_000_000
+            above_limit = box_data[box_data["total_audi"] > audience_limit]
+            show_full_range = st.checkbox(
+                "전체 범위 보기 — 500만 명 초과 영화 포함",
+                value=False, key="box_full_range",
+            )
+            if not show_full_range:
+                st.caption(
+                    f"세로축은 0~500만 명입니다. 범위 밖 영화 {len(above_limit)}편은 "
+                    "‘전체 범위 보기’를 눌러 확인하세요. 상자와 중앙값은 전체 데이터를 기준으로 계산합니다."
+                )
             fig = px.box(
                 box_data, x="genre", y="total_audi", color="genre",
                 points="outliers", hover_name="movieNm",
@@ -223,7 +234,15 @@ def main() -> None:
                 category_orders={"genre": eligible},
             )
             fig.update_layout(showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+            # 데이터는 유지하고 표시 범위만 조절하여 상자 통계가 바뀌지 않게 합니다.
+            if show_full_range:
+                fig.update_yaxes(autorange=True, rangemode="tozero")
+            else:
+                fig.update_yaxes(range=[0, audience_limit], autorange=False)
+            st.plotly_chart(
+                fig, use_container_width=True,
+                key=f"box_chart_{'full' if show_full_range else 'limited'}",
+            )
         show_insight("box_insight")
     st.divider()
 
