@@ -1,3 +1,5 @@
+from html import escape
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -78,9 +80,18 @@ def main() -> None:
         counts = (
             data["genre"].value_counts().rename_axis("장르")
             .reset_index(name="편수")
+            .sort_values(["편수", "장르"], ascending=[False, True])
+            .reset_index(drop=True)
         )
+        counts["순위"] = counts["편수"].rank(method="min", ascending=False).astype(int)
+        counts["범례"] = [
+            f"<b>★ {rank}위 · {escape(genre)} · {count:,}편</b>"
+            if rank <= 10 else f"{rank}위 · {escape(genre)} · {count:,}편"
+            for genre, count, rank in counts[["장르", "편수", "순위"]].itertuples(index=False, name=None)
+        ]
         fig = px.pie(
-            counts, names="장르", values="편수", hole=0.5,
+            counts, names="범례", values="편수", hole=0.5,
+            custom_data=["장르", "순위"],
             color_discrete_sequence=px.colors.qualitative.Safe,
         )
         fig.update_traces(
@@ -92,10 +103,18 @@ def main() -> None:
             ],
             textinfo="text",
             textposition="inside",
-            hovertemplate="<b>%{label}</b><br>편수: %{value:,}편<br>비율: %{percent:.1%}<extra></extra>",
+            sort=False,
+            hovertemplate="<b>%{customdata[0]}</b><br>순위: %{customdata[1]}위<br>편수: %{value:,}편<br>비율: %{percent:.1%}<extra></extra>",
         )
         fig.update_layout(
-            legend_title_text="장르",
+            legend=dict(
+                title_text="장르 순위 · 영화 편수 기준",
+                traceorder="normal", orientation="v",
+                x=1.02, xanchor="left", y=1, yanchor="top",
+                bgcolor="rgba(127, 127, 127, 0.06)",
+                bordercolor="rgba(127, 127, 127, 0.25)", borderwidth=1,
+                font=dict(size=13), itemsizing="constant",
+            ),
             margin=dict(t=20, b=20, l=20, r=20),
             height=500,
             annotations=[dict(
@@ -105,6 +124,7 @@ def main() -> None:
         )
         st.plotly_chart(fig, use_container_width=True)
         st.caption("3% 이상인 조각에만 비율을 표시합니다. 모든 조각에 마우스를 올리면 장르, 영화 편수, 비율을 확인할 수 있습니다.")
+        st.caption("★ 굵은 글씨는 10위 이내 장르입니다. 편수가 같으면 공동 순위로 표시하며, 동률 장르는 이름순으로 정렬합니다. 범례를 클릭하면 해당 장르를 숨기거나 다시 표시할 수 있습니다.")
         show_insight("genre_insight")
     st.divider()
     audience = data.dropna(subset=["total_audi"])
