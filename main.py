@@ -1,5 +1,6 @@
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -28,6 +29,11 @@ def load_data() -> pd.DataFrame:
     data["openDt"] = pd.to_datetime(
         data["openDt"], format="%Y%m%d", errors="coerce"
     )
+    data["nation"] = data["nation"].astype("string").str.strip().replace("", pd.NA).fillna("미분류")
+    data["movieNm"] = data["movieNm"].fillna("제목 미상")
+    for column in ["total_audi", "first_scrn", "first_week_audi"]:
+        values = pd.to_numeric(data[column], errors="coerce")
+        data[column] = values.where(values.ge(0) & values.lt(float("inf")))
     return data
 
 
@@ -93,7 +99,134 @@ def main() -> None:
         st.plotly_chart(fig, use_container_width=True)
         show_insight("genre_insight")
     st.divider()
-    # 다음 그래프도 별도 container에 넣고 show_insight(고유한 키)를 호출하세요.
+    audience = data.dropna(subset=["total_audi"])
+    scatter = data.dropna(subset=["first_scrn", "total_audi"])
+    palette = px.colors.qualitative.Alphabet + px.colors.qualitative.Dark24
+    colors = {genre: palette[i % len(palette)] for i, genre in enumerate(sorted(data["genre"].unique()))}
+    labels = {
+        "movieNm": "영화명", "genre": "장르", "nation": "제작 국가",
+        "total_audi": "총 관객 (명)", "first_scrn": "개봉일 스크린수",
+        "first_week_audi": "개봉 첫 주 관객 (명)",
+    }
+    if len(audience) < len(data):
+        st.caption("총 관객이 누락되었거나 유효하지 않은 영화는 관객수 그래프에서 제외합니다.")
+
+    with st.container():
+        st.subheader("2. 장르 안의 영화: 총 관객 트리맵")
+        positive = audience[audience["total_audi"] > 0]
+        st.caption("큰 칸은 장르, 그 안의 작은 칸은 영화입니다. 면적은 총 관객수에 비례합니다. 총 관객이 0인 영화는 면적이 없어 제외합니다.")
+        if positive.empty:
+            st.info("트리맵에 표시할 관객 데이터가 없습니다.")
+        else:
+            fig = px.treemap(
+                positive, path=["genre", "movieNm"], values="total_audi",
+                color="genre", color_discrete_map=colors, labels=labels,
+            )
+            fig.update_traces(hovertemplate="<b>%{label}</b><br>총 관객: %{value:,.0f}명<extra></extra>")
+            fig.update_layout(height=600, margin=dict(t=20, b=20, l=10, r=10))
+            st.plotly_chart(fig, use_container_width=True)
+        show_insight("treemap_insight")
+    st.divider()
+
+    with st.container():
+        st.subheader("3. 총 관객의 분포")
+        # 그래프와 설명 계산에 동일한 고정 구간을 적용합니다.
+        bin_size = 1_000_000
+        st.caption("구간 폭은 100만 명이며, 각 구간은 시작값 이상·끝값 미만입니다.")
+        if audience.empty:
+            st.info("히스토그램에 표시할 관객 데이터가 없습니다.")
+        else:
+            values = audience["total_audi"]
+            bin_end = (int(values.max() // bin_size) + 1) * bin_size
+            fig = go.Figure(go.Histogram(
+                x=values, xbins=dict(start=0, end=bin_end, size=bin_size),
+                marker_color="#527AC7",
+                hovertemplate="총 관객 구간: %{x}<br>영화 편수: %{y}편<extra></extra>",
+            ))
+            fig.update_layout(
+                xaxis_title="총 관객 (명)", yaxis_title="영화 편수",
+                yaxis=dict(dtick=1) if len(audience) < 20 else {},
+                bargap=0.05,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            bin_counts = (values // bin_size).astype(int).value_counts()
+            largest_count = int(bin_counts.max())
+            modes = sorted(bin_counts[bin_counts.eq(largest_count)].index)
+            intervals = ", ".join(
+                f"{int(i * bin_size):,}명 이상 {int((i + 1) * bin_size):,}명 미만"
+                for i in modes
+            )
+            st.write(
+                f"영화가 가장 많이 모인 구간은 {intervals}이며, "
+                f"{'각각 ' if len(modes) > 1 else ''}{largest_count}편"
+                f"(유효한 영화 {len(audience)}편 중 {largest_count / len(audience):.1%})입니다."
+            )
+            top_names = ", ".join(audience.loc[values.eq(values.max()), "movieNm"].astype(str))
+            st.write(f"총 관객이 가장 많은 영화: {top_names} — {values.max():,.0f}명.")
+        show_insight("histogram_insight")
+    st.divider()
+
+    with st.container():
+        st.subheader("4. 개봉일 스크린수와 총 관객의 관계")
+        if scatter.empty:
+            st.info("산점도에 표시할 데이터가 없습니다.")
+        else:
+            fig = px.scatter(
+                scatter, x="first_scrn", y="total_audi", color="genre",
+                hover_name="movieNm", color_discrete_map=colors, labels=labels,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        show_insight("scatter_insight")
+    st.divider()
+
+    with st.container():
+        st.subheader("5. 장르별 총 관객 상자 그림")
+        eligible = data["genre"].value_counts()
+        eligible = eligible[eligible >= 10].index.tolist()
+        box_data = audience[audience["genre"].isin(eligible)]
+        st.caption("전체 데이터에서 영화가 10편 이상인 장르만 표시합니다. 점은 상자에서 1.5×IQR 기준의 수염을 벗어난 영화입니다.")
+        if box_data.empty:
+            st.info("영화가 10편 이상이며 유효한 관객 데이터가 있는 장르가 없습니다.")
+        else:
+            fig = px.box(
+                box_data, x="genre", y="total_audi", color="genre",
+                points="outliers", hover_name="movieNm",
+                color_discrete_map=colors, labels=labels,
+                category_orders={"genre": eligible},
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        show_insight("box_insight")
+    st.divider()
+
+    with st.container():
+        st.subheader("6. 첫 주 관객을 함께 보는 버블 그래프")
+        bubble = scatter.dropna(subset=["first_week_audi"])
+        st.caption("가로축은 개봉일 스크린수, 세로축은 총 관객입니다. 색은 장르, 점의 면적은 첫 주 관객을 나타냅니다. 첫 주 관객이 0인 영화는 점 크기가 0입니다.")
+        if bubble.empty or bubble["first_week_audi"].max() == 0:
+            st.info("크기로 표시할 첫 주 관객 데이터가 없습니다.")
+        else:
+            fig = px.scatter(
+                bubble, x="first_scrn", y="total_audi", size="first_week_audi",
+                color="genre", hover_name="movieNm", size_max=55,
+                color_discrete_map=colors, labels=labels,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        show_insight("bubble_insight")
+    st.divider()
+
+    with st.container():
+        st.subheader("7. 제작 국가에서 장르로: 영화 편수 선버스트")
+        st.caption("안쪽은 제작 국가, 바깥쪽은 장르이며 칸의 크기는 영화 편수입니다. 제작 국가는 CSV의 표기를 그대로 사용합니다.")
+        country_genres = data.groupby(["nation", "genre"]).size().reset_index(name="편수")
+        fig = px.sunburst(
+            country_genres, path=["nation", "genre"], values="편수", labels=labels,
+        )
+        fig.update_traces(hovertemplate="<b>%{label}</b><br>영화 편수: %{value:,}편<extra></extra>")
+        fig.update_layout(height=600, margin=dict(t=20, b=20, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True)
+        show_insight("sunburst_insight")
+    st.divider()
 
 
 if __name__ == "__main__":
