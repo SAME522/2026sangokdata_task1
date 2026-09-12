@@ -84,7 +84,9 @@ def main() -> None:
             color_discrete_sequence=px.colors.qualitative.Safe,
         )
         fig.update_traces(
-            textinfo="percent",
+            # 작은 조각의 숫자와 연결선은 숨기고, 수치는 툴팁으로 표시합니다.
+            textinfo="none",
+            textposition="none",
             hovertemplate="<b>%{label}</b><br>편수: %{value:,}편<br>비율: %{percent:.1%}<extra></extra>",
         )
         fig.update_layout(
@@ -97,6 +99,7 @@ def main() -> None:
             )],
         )
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("조각에 마우스를 올리면 장르, 영화 편수, 비율을 확인할 수 있습니다.")
         show_insight("genre_insight")
     st.divider()
     audience = data.dropna(subset=["total_audi"])
