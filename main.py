@@ -84,9 +84,14 @@ def main() -> None:
             color_discrete_sequence=px.colors.qualitative.Safe,
         )
         fig.update_traces(
-            # 작은 조각의 숫자와 연결선은 숨기고, 수치는 툴팁으로 표시합니다.
-            textinfo="none",
-            textposition="none",
+            # 반올림 전 비율이 3% 이상인 조각에만 비율을 표시합니다.
+            text=[
+                f"{count / counts['편수'].sum():.2%}"
+                if count * 100 >= counts["편수"].sum() * 3 else ""
+                for count in counts["편수"]
+            ],
+            textinfo="text",
+            textposition="inside",
             hovertemplate="<b>%{label}</b><br>편수: %{value:,}편<br>비율: %{percent:.1%}<extra></extra>",
         )
         fig.update_layout(
@@ -99,7 +104,7 @@ def main() -> None:
             )],
         )
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("조각에 마우스를 올리면 장르, 영화 편수, 비율을 확인할 수 있습니다.")
+        st.caption("3% 이상인 조각에만 비율을 표시합니다. 모든 조각에 마우스를 올리면 장르, 영화 편수, 비율을 확인할 수 있습니다.")
         show_insight("genre_insight")
     st.divider()
     audience = data.dropna(subset=["total_audi"])
