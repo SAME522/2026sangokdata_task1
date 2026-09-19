@@ -206,7 +206,7 @@ x_test, _ = date_parts(test[selected_features], date_columns)
 # 관객 수의 큰 편차를 완화하기 위해 log1p(total_audi)를 회귀한다.
 y_train_log = np.log1p(train["total_audi"].astype(float))
 model.fit(x_train, y_train_log)
-predicted = np.maximum(0.0, np.expm1(model.predict(x_test)))
+predicted = np.expm1(model.predict(x_test))
 actual = test["total_audi"].astype(float).to_numpy()
 
 r2 = r2_score(actual, predicted)
@@ -234,6 +234,9 @@ st.info(
 
 below_floor = predicted < 1_000
 plot_y = np.maximum(predicted, 1_000)
+below_diagonal = predicted < actual
+above_diagonal = predicted > actual
+negative_prediction = predicted < 0
 axis_min = 1_000.0
 axis_max = max(actual.max(), plot_y.max()) * 1.15
 
@@ -285,8 +288,78 @@ fig.update_layout(
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     margin=dict(l=20, r=20, t=90, b=20),
 )
-st.plotly_chart(fig, use_container_width=True)
+scatter_col, scatter_stats_col = st.columns([4, 1])
+with scatter_col:
+    st.plotly_chart(fig, use_container_width=True)
+with scatter_stats_col:
+    st.markdown("#### 산점도 읽기")
+    st.metric("대각선 아래", f"{below_diagonal.sum():,}편")
+    st.caption("예측보다 실제 관객이 많은 영화")
+    st.metric("대각선 위", f"{above_diagonal.sum():,}편")
+    st.caption("실제보다 예측 관객이 많은 영화")
+    st.metric("음수 예측", f"{negative_prediction.sum():,}편")
+    st.metric("가장 작은 예측값", f"{predicted.min():,.1f}명")
 st.caption(f"예측값이 1,000명보다 작아 그래프 바닥(1,000명)에 표시된 영화: {below_floor.sum():,}편")
+
+residuals = actual - predicted
+error_detail = test[["movieCd", "movieNm", "first_scrn"]].copy()
+error_detail["오차"] = residuals
+error_detail["절대오차"] = np.abs(residuals)
+largest_errors = error_detail.nlargest(8, "절대오차").sort_values("오차")
+largest_errors["표시명"] = largest_errors.apply(
+    lambda row: f"{row['movieNm']} · 첫 스크린 {int(row['first_scrn']):,}개", axis=1
+)
+total_absolute_error = error_detail["절대오차"].sum()
+largest_error_share = (
+    largest_errors["절대오차"].sum() / total_absolute_error * 100
+    if total_absolute_error > 0
+    else 0.0
+)
+
+error_fig = go.Figure()
+for positive, label, color in (
+    (True, "실제가 더 많음", "#2563EB"),
+    (False, "예측이 더 많음", "#F97316"),
+):
+    direction_rows = largest_errors[(largest_errors["오차"] >= 0) == positive]
+    error_fig.add_trace(
+        go.Bar(
+            x=direction_rows["오차"],
+            y=direction_rows["표시명"],
+            orientation="h",
+            name=label,
+            marker_color=color,
+            text=direction_rows["오차"].map(lambda value: f"{value:+,.0f}명"),
+            textposition="outside",
+            customdata=np.c_[
+                direction_rows["절대오차"], direction_rows["first_scrn"]
+            ],
+            hovertemplate=(
+                "%{y}<br>실제−예측: %{x:+,.0f}명"
+                "<br>절대오차: %{customdata[0]:,.0f}명"
+                "<br>첫 관측일 스크린: %{customdata[1]:,.0f}개<extra></extra>"
+            ),
+        )
+    )
+error_fig.add_vline(x=0, line_width=2, line_color="#374151")
+error_fig.update_layout(
+    title="실제−예측 절대오차가 큰 영화 8편",
+    xaxis_title="오차(명): 왼쪽은 과대예측, 오른쪽은 과소예측",
+    yaxis=dict(
+        title=None,
+        categoryorder="array",
+        categoryarray=largest_errors["표시명"].tolist(),
+    ),
+    barmode="overlay",
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    margin=dict(l=300, r=80, t=90, b=50),
+    height=520,
+)
+st.plotly_chart(error_fig, use_container_width=True)
+st.caption(
+    f"이 8편의 절대오차 합은 테스트 영화 전체 절대오차 합의 "
+    f"{largest_error_share:.1f}%입니다."
+)
 
 with st.expander("테스트 영화별 오차 보기"):
     evaluation = test[["movieCd", "movieNm"]].copy()
