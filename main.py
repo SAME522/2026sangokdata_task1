@@ -61,6 +61,38 @@ slope, intercept = np.polyfit(x, y, 1)
 correlation = float(np.corrcoef(x, y)[0, 1])
 annual["회귀기온"] = intercept + slope * x
 
+last_year = int(annual["연도"].max())
+recent_start_year = last_year - 19
+recent = annual[annual["연도"] >= recent_start_year]
+if len(recent) < 2:
+    st.error("최근 20년 기울기를 계산할 유효 연도가 2개 미만입니다.")
+    st.stop()
+recent_x = recent["연도"].to_numpy(dtype=float) - BASE_YEAR
+recent_y = recent["연평균기온"].to_numpy(dtype=float)
+recent_slope, _ = np.polyfit(recent_x, recent_y, 1)
+
+st.subheader("기온 상승 속도 비교")
+overall_col, recent_col = st.columns(2)
+with overall_col:
+    st.metric(
+        "전체 기간 기울기",
+        f"{slope * 100:+.2f} °C / 100년",
+        help="전체 유효 연도의 회귀 직선 기울기를 100년 단위로 환산한 값입니다.",
+    )
+with recent_col:
+    st.metric(
+        "최근 20년 기울기",
+        f"{recent_slope * 100:+.2f} °C / 100년",
+        help=(
+            f"{recent_start_year}~{last_year}년 구간 중 기준을 충족한 "
+            f"{len(recent)}개 연도로 계산했습니다."
+        ),
+    )
+st.caption(
+    f"최근 20년 비교 구간: {recent_start_year}~{last_year}년 "
+    f"(유효 연도 {len(recent)}개)"
+)
+
 selected_year = st.slider("예측할 연도", 1900, 2100, 2025, 1)
 predicted_temperature = intercept + slope * (selected_year - BASE_YEAR)
 
