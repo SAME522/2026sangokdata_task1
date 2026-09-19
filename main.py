@@ -19,20 +19,16 @@ FEATURES = {
     "국가": "nation",
     "첫 관측일 스크린 수": "first_scrn",
     "첫 관측일 상영 횟수": "first_show",
+    "상영당 관객 수": "상영당 관객 수",
     "10위권 첫 등장일": "first_date",
     "성수기 개봉 여부": "peak",
-    "첫 주 관객 수": "first_week_audi",
-    "10위권에 머문 일수": "days_in_top10",
 }
 
 DEFAULT_FEATURES = {
-    "genre",
-    "nation",
     "first_scrn",
     "first_show",
     "peak",
-    "first_week_audi",
-    "days_in_top10",
+    "상영당 관객 수",
 }
 
 
@@ -74,7 +70,7 @@ def build_model(selected, x_train):
     log_numeric = [
         c
         for c in numeric
-        if c in {"first_scrn", "first_show", "first_week_audi", "days_in_top10"}
+        if c in {"first_scrn", "first_show", "상영당 관객 수"}
     ]
     plain_numeric = [c for c in numeric if c not in log_numeric]
 
@@ -147,10 +143,10 @@ def evaluate_features(feature_names, train_frame, test_frame):
 
 st.title("🎬 영화 흥행 예측기")
 st.caption("KOBIS 영화 정보로 총 관객 수를 예측하는 다중 선형회귀 모델")
-st.warning(
-    "이 데이터에는 첫 주 관객 수처럼 개봉 후에 집계되는 값이 포함되어 있습니다. "
-    "따라서 아래 결과는 사후 데이터를 이용한 평가이며, 실제 개봉 전 흥행 예측 성능을 "
-    "뜻하지 않습니다."
+st.info(
+    "예측 시점은 영화가 박스오피스 10위권에 처음 등장한 날의 집계가 끝난 직후입니다. "
+    "상영당 관객 수를 포함해 그 시점까지 알 수 있는 정보만 예측 변수로 사용합니다. "
+    "따라서 실제 개봉 전 예측은 아닙니다."
 )
 
 try:
@@ -162,6 +158,28 @@ except Exception as error:
 daily_dates = pd.to_datetime(daily["날짜"].astype("string"), format="%Y%m%d", errors="coerce")
 period_start = daily_dates.min().strftime("%Y-%m-%d")
 period_end = daily_dates.max().strftime("%Y-%m-%d")
+
+# 일별 박스오피스에서 영화별 10위권 최초 등장 행을 찾아 새 속성을 만든다.
+first_daily = (
+    daily.sort_values(["영화코드", "날짜"], kind="stable")
+    .drop_duplicates("영화코드", keep="first")
+    .copy()
+)
+first_daily["상영당 관객 수"] = np.where(
+    first_daily["상영횟수"] > 0,
+    first_daily["일관객"] / first_daily["상영횟수"],
+    np.nan,
+)
+movies = movies.merge(
+    first_daily[["영화코드", "상영당 관객 수"]],
+    left_on="movieCd",
+    right_on="영화코드",
+    how="left",
+    validate="one_to_one",
+).drop(columns="영화코드")
+if movies["상영당 관객 수"].isna().any():
+    st.error("일별 박스오피스에서 일부 영화의 최초 등장일 정보를 찾지 못했습니다.")
+    st.stop()
 
 st.sidebar.header("예측 변수 선택")
 selected_features = []
@@ -180,9 +198,29 @@ train = ordered.loc[~test_mask].copy()
 test = ordered.loc[test_mask].copy()
 
 basic_features = ["first_scrn", "first_show", "peak"]
-first_week_features = basic_features + ["first_week_audi"]
+per_show_features = basic_features + ["상영당 관객 수"]
 basic_r2, basic_mae = evaluate_features(basic_features, train, test)
-week_r2, week_mae = evaluate_features(first_week_features, train, test)
+per_show_r2, per_show_mae = evaluate_features(per_show_features, train, test)
+
+st.subheader("상영당 관객 수 분포")
+histogram = go.Figure(
+    go.Histogram(
+        x=movies["상영당 관객 수"],
+        nbinsx=30,
+        marker_color="#6366F1",
+        hovertemplate="상영당 관객 수: %{x:.1f}명<br>영화 수: %{y}편<extra></extra>",
+    )
+)
+histogram.update_layout(
+    xaxis_title="상영당 관객 수(명)",
+    yaxis_title="영화 수(편)",
+    bargap=0.05,
+    margin=dict(l=20, r=20, t=20, b=20),
+)
+st.plotly_chart(histogram, use_container_width=True)
+st.caption(
+    "영화별 10위권 최초 등장일의 일관객을 그날의 상영횟수로 나눈 값입니다."
+)
 
 st.subheader("고정 변수 조합의 예측 점수 비교")
 score_col1, score_col2 = st.columns(2)
@@ -193,10 +231,10 @@ with score_col1:
         f"\n평균 절대 오차: {basic_mae:,.0f}명"
     )
 with score_col2:
-    st.metric("기본 변수 + 첫 주 관객 수 · R²", f"{week_r2:.3f}")
+    st.metric("기본 변수 + 상영당 관객 수 · R²", f"{per_show_r2:.3f}")
     st.caption(
-        "기본 변수 3개 + 첫 주 관객 수  "
-        f"\n평균 절대 오차: {week_mae:,.0f}명"
+        "기본 변수 3개 + 상영당 관객 수  "
+        f"\n평균 절대 오차: {per_show_mae:,.0f}명"
     )
 st.caption("두 점수는 아래와 동일한 고정 학습·테스트 분할에서 계산했습니다.")
 
