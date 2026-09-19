@@ -95,6 +95,14 @@ st.caption(
 
 selected_year = st.slider("예측할 연도", 1900, 2100, 2025, 1)
 predicted_temperature = intercept + slope * (selected_year - BASE_YEAR)
+graph_start, graph_end = st.slider(
+    "그래프에 표시할 기간",
+    min_value=1900,
+    max_value=2100,
+    value=(int(annual["연도"].min()), int(annual["연도"].max())),
+    step=1,
+)
+chart_data = annual[annual["연도"].between(graph_start, graph_end)]
 
 left, right = st.columns([1, 2])
 with left:
@@ -114,7 +122,7 @@ with left:
 
 with right:
     scatter = px.scatter(
-        annual,
+        chart_data,
         x="연도",
         y="연평균기온",
         hover_data={"관측일": True, "회귀기온": ":.2f"},
@@ -122,13 +130,36 @@ with right:
         title="서울 연평균기온과 선형 추세",
     )
     scatter.add_scatter(
-        x=annual["연도"],
-        y=annual["회귀기온"],
+        x=[graph_start, graph_end],
+        y=[
+            intercept + slope * (graph_start - BASE_YEAR),
+            intercept + slope * (graph_end - BASE_YEAR),
+        ],
         mode="lines",
         name="회귀 직선",
         line={"color": "crimson", "width": 3},
     )
-    scatter.update_xaxes(tickmode="linear", dtick=10, tickformat="d", title="연도")
+    if graph_start <= selected_year <= graph_end:
+        scatter.add_scatter(
+            x=[selected_year],
+            y=[predicted_temperature],
+            mode="markers",
+            name=f"{selected_year}년 예상 기온",
+            marker={"color": "gold", "size": 13, "line": {"color": "black", "width": 1}},
+        )
+        scatter.add_vline(
+            x=selected_year,
+            line_dash="dot",
+            line_color="goldenrod",
+            opacity=0.7,
+        )
+    scatter.update_xaxes(
+        range=[graph_start - 0.5, graph_end + 0.5],
+        tickmode="linear",
+        dtick=max(1, (graph_end - graph_start) // 10),
+        tickformat="d",
+        title="연도",
+    )
     scatter.update_yaxes(title="연평균기온 (°C)")
     scatter.update_layout(hovermode="x unified", legend_title_text="")
     st.plotly_chart(scatter, use_container_width=True)
