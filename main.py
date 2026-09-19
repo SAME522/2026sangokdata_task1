@@ -133,8 +133,25 @@ def build_model(selected, x_train):
     return model, x_train, date_columns
 
 
+def evaluate_features(feature_names, train_frame, test_frame):
+    """같은 고정 분할에서 변수 조합별 R²와 MAE를 계산한다."""
+    fitted_model, x_train, date_columns = build_model(
+        feature_names, train_frame[feature_names]
+    )
+    x_test, _ = date_parts(test_frame[feature_names], date_columns)
+    fitted_model.fit(x_train, np.log1p(train_frame["total_audi"].astype(float)))
+    predictions = np.maximum(0.0, np.expm1(fitted_model.predict(x_test)))
+    observed = test_frame["total_audi"].astype(float).to_numpy()
+    return r2_score(observed, predictions), mean_absolute_error(observed, predictions)
+
+
 st.title("🎬 영화 흥행 예측기")
 st.caption("KOBIS 영화 정보로 총 관객 수를 예측하는 다중 선형회귀 모델")
+st.warning(
+    "이 데이터에는 첫 주 관객 수처럼 개봉 후에 집계되는 값이 포함되어 있습니다. "
+    "따라서 아래 결과는 사후 데이터를 이용한 평가이며, 실제 개봉 전 흥행 예측 성능을 "
+    "뜻하지 않습니다."
+)
 
 try:
     daily, movies = load_data()
@@ -161,6 +178,27 @@ ordered = movies.sort_values("movieCd", kind="stable").reset_index(drop=True)
 test_mask = (np.arange(len(ordered)) % 10) < 3
 train = ordered.loc[~test_mask].copy()
 test = ordered.loc[test_mask].copy()
+
+basic_features = ["first_scrn", "first_show", "peak"]
+first_week_features = basic_features + ["first_week_audi"]
+basic_r2, basic_mae = evaluate_features(basic_features, train, test)
+week_r2, week_mae = evaluate_features(first_week_features, train, test)
+
+st.subheader("고정 변수 조합의 예측 점수 비교")
+score_col1, score_col2 = st.columns(2)
+with score_col1:
+    st.metric("기본 변수 3개 · R²", f"{basic_r2:.3f}")
+    st.caption(
+        "첫 관측일 스크린 수 + 첫 관측일 상영 횟수 + 성수기 여부  "
+        f"\n평균 절대 오차: {basic_mae:,.0f}명"
+    )
+with score_col2:
+    st.metric("기본 변수 + 첫 주 관객 수 · R²", f"{week_r2:.3f}")
+    st.caption(
+        "기본 변수 3개 + 첫 주 관객 수  "
+        f"\n평균 절대 오차: {week_mae:,.0f}명"
+    )
+st.caption("두 점수는 아래와 동일한 고정 학습·테스트 분할에서 계산했습니다.")
 
 model, x_train, date_columns = build_model(selected_features, train[selected_features])
 x_test, _ = date_parts(test[selected_features], date_columns)
