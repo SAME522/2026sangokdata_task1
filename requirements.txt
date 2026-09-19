@@ -1,3 +1,4 @@
 streamlit
-requests
-tzdata
+pandas
+numpy
+plotly
