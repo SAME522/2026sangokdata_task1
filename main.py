@@ -1,416 +1,182 @@
-import numpy as np
+import math
+
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 import streamlit as st
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 
-DAILY_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/kobis_daily.csv"
-MOVIES_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/kobis_movies.csv"
+DATA_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/kobis_movies.csv"
+CLUSTER_LABELS = ["㉮", "㉯", "㉰"]
 
 FEATURES = {
-    "개봉일": "openDt",
-    "장르": "genre",
-    "국가": "nation",
-    "첫 관측일 스크린 수": "first_scrn",
-    "첫 관측일 상영 횟수": "first_show",
-    "상영당 관객 수": "상영당 관객 수",
-    "10위권 첫 등장일": "first_date",
-    "성수기 개봉 여부": "peak",
+    "스크린 수 (log10)": "log_first_scrn",
+    "누적 관객 (log10)": "log_total_audi",
+    "10위권 일수": "days_in_top10",
+    "롱런 지수": "long_run_index",
 }
 
-DEFAULT_FEATURES = {
-    "first_scrn",
-    "first_show",
-    "peak",
-    "상영당 관객 수",
+ORIGINAL_COLUMNS = {
+    "스크린 수 평균": "first_scrn",
+    "누적 관객 평균": "total_audi",
+    "10위권 일수 평균": "days_in_top10",
+    "롱런 지수 평균": "long_run_index",
 }
 
 
-st.set_page_config(page_title="영화 흥행 예측기", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="영화 유형 나누기", page_icon="🎬", layout="wide")
+st.title("🎬 영화 유형 나누기")
 
 
-@st.cache_data(show_spinner=False)
-def load_data():
-    daily = pd.read_csv(DAILY_URL, encoding="utf-8", dtype={"영화코드": "string"})
-    movies = pd.read_csv(MOVIES_URL, encoding="utf-8", dtype={"movieCd": "string"})
-    return daily, movies
+@st.cache_data
+def load_and_prepare_data(url: str):
+    raw = pd.read_csv(url, encoding="utf-8")
+    total_count = len(raw)
 
-
-def date_parts(frame, columns):
-    """날짜 열을 선형회귀에 쓸 수 있는 연·월·일 숫자로 펼친다."""
-    result = frame.copy()
-    expanded = []
-    for column in columns:
-        parsed = pd.to_datetime(
-            result[column].astype("string").str.replace(r"\.0$", "", regex=True),
-            format="%Y%m%d",
-            errors="coerce",
-        )
-        for suffix, values in (
-            ("year", parsed.dt.year),
-            ("month", parsed.dt.month),
-            ("day", parsed.dt.day),
-        ):
-            new_column = f"{column}_{suffix}"
-            result[new_column] = values
-            expanded.append(new_column)
-    return result, expanded
-
-
-def build_model(selected, x_train):
-    categorical = [c for c in selected if c in {"genre", "nation"}]
-    date_columns = [c for c in selected if c in {"openDt", "first_date"}]
-    numeric = [c for c in selected if c not in categorical + date_columns]
-    log_numeric = [
-        c
-        for c in numeric
-        if c in {"first_scrn", "first_show", "상영당 관객 수"}
+    numeric_columns = [
+        "first_scrn",
+        "first_week_audi",
+        "total_audi",
+        "days_in_top10",
     ]
-    plain_numeric = [c for c in numeric if c not in log_numeric]
+    data = raw.copy()
+    for column in numeric_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
 
-    x_train, expanded_dates = date_parts(x_train, date_columns)
-    transformers = []
-    if log_numeric:
-        transformers.append(
-            (
-                "log_numeric",
-                Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("log1p", FunctionTransformer(np.log1p)),
-                        ("scaler", StandardScaler()),
-                    ]
-                ),
-                log_numeric,
-            )
-        )
-    if plain_numeric or expanded_dates:
-        transformers.append(
-            (
-                "numeric",
-                Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scaler", StandardScaler()),
-                    ]
-                ),
-                plain_numeric + expanded_dates,
-            )
-        )
-    if categorical:
-        transformers.append(
-            (
-                "categorical",
-                Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="most_frequent")),
-                        (
-                            "onehot",
-                            OneHotEncoder(handle_unknown="ignore", drop="first"),
-                        ),
-                    ]
-                ),
-                categorical,
-            )
-        )
-
-    model = Pipeline(
-        [
-            ("preprocess", ColumnTransformer(transformers=transformers)),
-            ("regression", LinearRegression()),
-        ]
+    # 로그를 계산할 수 있어야 하므로 스크린 수와 누적 관객은 양수여야 한다.
+    valid = (
+        data[numeric_columns].notna().all(axis=1)
+        & (data["first_week_audi"] > 0)
+        & (data["first_scrn"] > 0)
+        & (data["total_audi"] > 0)
     )
-    return model, x_train, date_columns
+    data = data.loc[valid].copy()
 
+    data["log_first_scrn"] = data["first_scrn"].map(math.log10)
+    data["log_total_audi"] = data["total_audi"].map(math.log10)
+    data["long_run_index"] = (
+        data["total_audi"] / data["first_week_audi"]
+    ).clip(upper=20)
 
-def evaluate_features(feature_names, train_frame, test_frame):
-    """같은 고정 분할에서 변수 조합별 R²와 MAE를 계산한다."""
-    fitted_model, x_train, date_columns = build_model(
-        feature_names, train_frame[feature_names]
-    )
-    x_test, _ = date_parts(test_frame[feature_names], date_columns)
-    fitted_model.fit(x_train, np.log1p(train_frame["total_audi"].astype(float)))
-    predictions = np.maximum(0.0, np.expm1(fitted_model.predict(x_test)))
-    observed = test_frame["total_audi"].astype(float).to_numpy()
-    return r2_score(observed, predictions), mean_absolute_error(observed, predictions)
+    feature_columns = list(FEATURES.values())
+    data = data.dropna(subset=feature_columns)
+    return data, total_count
 
-
-st.title("🎬 영화 흥행 예측기")
-st.caption("KOBIS 영화 정보로 총 관객 수를 예측하는 다중 선형회귀 모델")
-st.info(
-    "예측 시점은 영화가 박스오피스 10위권에 처음 등장한 날의 집계가 끝난 직후입니다. "
-    "상영당 관객 수를 포함해 그 시점까지 알 수 있는 정보만 예측 변수로 사용합니다. "
-    "따라서 실제 개봉 전 예측은 아닙니다."
-)
 
 try:
-    daily, movies = load_data()
+    movies, total_count = load_and_prepare_data(DATA_URL)
 except Exception as error:
-    st.error(f"데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요. ({error})")
+    st.error(f"데이터를 불러오지 못했습니다: {error}")
     st.stop()
 
-daily_dates = pd.to_datetime(daily["날짜"].astype("string"), format="%Y%m%d", errors="coerce")
-period_start = daily_dates.min().strftime("%Y-%m-%d")
-period_end = daily_dates.max().strftime("%Y-%m-%d")
+st.write(f"전체 영화 **{total_count:,}편** · 묶음 분석에 사용한 영화 **{len(movies):,}편**")
 
-# 일별 박스오피스에서 영화별 10위권 최초 등장 행을 찾아 새 속성을 만든다.
-first_daily = (
-    daily.sort_values(["영화코드", "날짜"], kind="stable")
-    .drop_duplicates("영화코드", keep="first")
-    .copy()
+selected_names = st.multiselect(
+    "묶는 데 사용할 속성 (2개 이상)",
+    options=list(FEATURES.keys()),
+    default=list(FEATURES.keys()),
 )
-first_daily["상영당 관객 수"] = np.where(
-    first_daily["상영횟수"] > 0,
-    first_daily["일관객"] / first_daily["상영횟수"],
-    np.nan,
-)
-movies = movies.merge(
-    first_daily[["영화코드", "상영당 관객 수"]],
-    left_on="movieCd",
-    right_on="영화코드",
-    how="left",
-    validate="one_to_one",
-).drop(columns="영화코드")
-if movies["상영당 관객 수"].isna().any():
-    st.error("일별 박스오피스에서 일부 영화의 최초 등장일 정보를 찾지 못했습니다.")
+
+if len(selected_names) < 2:
+    st.warning("묶는 데 사용할 속성을 두 개 이상 골라 주세요.")
     st.stop()
 
-st.sidebar.header("예측 변수 선택")
-selected_features = []
-for label, column in FEATURES.items():
-    if st.sidebar.checkbox(label, value=column in DEFAULT_FEATURES, key=column):
-        selected_features.append(column)
+selected_columns = [FEATURES[name] for name in selected_names]
+scaled_values = StandardScaler().fit_transform(movies[selected_columns])
 
-if not selected_features:
-    st.warning("왼쪽에서 예측 변수를 하나 이상 선택해 주세요.")
-    st.stop()
+model = KMeans(n_clusters=3, random_state=42, n_init=10)
+movies["cluster_raw"] = model.fit_predict(scaled_values)
 
-# 명세에 따른 고정 분할: 영화코드 정렬 후 각 10편 묶음의 앞 3편은 테스트용.
-ordered = movies.sort_values("movieCd", kind="stable").reset_index(drop=True)
-test_mask = (np.arange(len(ordered)) % 10) < 3
-train = ordered.loc[~test_mask].copy()
-test = ordered.loc[test_mask].copy()
+# 누적 관객 평균이 큰 기존 묶음부터 ㉮, ㉯, ㉰를 붙인다.
+cluster_order = (
+    movies.groupby("cluster_raw")["total_audi"].mean().sort_values(ascending=False).index
+)
+label_map = {cluster: CLUSTER_LABELS[index] for index, cluster in enumerate(cluster_order)}
+movies["묶음"] = movies["cluster_raw"].map(label_map)
+movies["묶음"] = pd.Categorical(movies["묶음"], categories=CLUSTER_LABELS, ordered=True)
 
-basic_features = ["first_scrn", "first_show", "peak"]
-per_show_features = basic_features + ["상영당 관객 수"]
-basic_r2, basic_mae = evaluate_features(basic_features, train, test)
-per_show_r2, per_show_mae = evaluate_features(per_show_features, train, test)
+color_map = {"㉮": "#E45756", "㉯": "#4C78A8", "㉰": "#54A24B"}
 
-st.subheader("상영당 관객 수 분포")
-histogram = go.Figure(
-    go.Histogram(
-        x=movies["상영당 관객 수"],
-        nbinsx=30,
-        marker_color="#6366F1",
-        hovertemplate="상영당 관객 수: %{x:.1f}명<br>영화 수: %{y}편<extra></extra>",
+st.subheader("2차원 산점도")
+axis_col1, axis_col2 = st.columns(2)
+with axis_col1:
+    x_name = st.selectbox("가로축", selected_names, index=0)
+with axis_col2:
+    y_name = st.selectbox("세로축", selected_names, index=1)
+
+fig_2d = px.scatter(
+    movies,
+    x=FEATURES[x_name],
+    y=FEATURES[y_name],
+    color="묶음",
+    color_discrete_map=color_map,
+    category_orders={"묶음": CLUSTER_LABELS},
+    hover_name="movieNm",
+    labels={FEATURES[x_name]: x_name, FEATURES[y_name]: y_name},
+    opacity=0.75,
+)
+fig_2d.update_traces(marker={"size": 7})
+st.plotly_chart(fig_2d, use_container_width=True)
+
+st.subheader("3차원 산점도")
+if len(selected_names) < 3:
+    st.info("3차원 산점도를 보려면 묶는 속성을 세 개 이상 골라 주세요.")
+else:
+    axis_col1, axis_col2, axis_col3 = st.columns(3)
+    with axis_col1:
+        x3_name = st.selectbox("x축", selected_names, index=0, key="x3")
+    with axis_col2:
+        y3_name = st.selectbox("y축", selected_names, index=1, key="y3")
+    with axis_col3:
+        z3_name = st.selectbox("z축", selected_names, index=2, key="z3")
+
+    fig_3d = px.scatter_3d(
+        movies,
+        x=FEATURES[x3_name],
+        y=FEATURES[y3_name],
+        z=FEATURES[z3_name],
+        color="묶음",
+        color_discrete_map=color_map,
+        category_orders={"묶음": CLUSTER_LABELS},
+        hover_name="movieNm",
+        labels={
+            FEATURES[x3_name]: x3_name,
+            FEATURES[y3_name]: y3_name,
+            FEATURES[z3_name]: z3_name,
+        },
+        opacity=0.75,
     )
-)
-histogram.update_layout(
-    xaxis_title="상영당 관객 수(명)",
-    yaxis_title="영화 수(편)",
-    bargap=0.05,
-    margin=dict(l=20, r=20, t=20, b=20),
-)
-st.plotly_chart(histogram, use_container_width=True)
-st.caption(
-    "영화별 10위권 최초 등장일의 일관객을 그날의 상영횟수로 나눈 값입니다."
+    fig_3d.update_traces(marker={"size": 3})
+    fig_3d.update_layout(scene={"aspectmode": "data"})
+    st.plotly_chart(fig_3d, use_container_width=True)
+
+st.subheader("묶음별 요약")
+summary = movies.groupby("묶음", observed=False).agg(
+    편수=("movieCd", "size"),
+    **{label: (column, "mean") for label, column in ORIGINAL_COLUMNS.items()},
 )
 
-st.subheader("고정 변수 조합의 예측 점수 비교")
-score_col1, score_col2 = st.columns(2)
-with score_col1:
-    st.metric("기본 변수 3개 · R²", f"{basic_r2:.3f}")
-    st.caption(
-        "첫 관측일 스크린 수 + 첫 관측일 상영 횟수 + 성수기 여부  "
-        f"\n평균 절대 오차: {basic_mae:,.0f}명"
-    )
-with score_col2:
-    st.metric("기본 변수 + 상영당 관객 수 · R²", f"{per_show_r2:.3f}")
-    st.caption(
-        "기본 변수 3개 + 상영당 관객 수  "
-        f"\n평균 절대 오차: {per_show_mae:,.0f}명"
-    )
-st.caption("두 점수는 아래와 동일한 고정 학습·테스트 분할에서 계산했습니다.")
-
-model, x_train, date_columns = build_model(selected_features, train[selected_features])
-x_test, _ = date_parts(test[selected_features], date_columns)
-
-# 관객 수의 큰 편차를 완화하기 위해 log1p(total_audi)를 회귀한다.
-y_train_log = np.log1p(train["total_audi"].astype(float))
-model.fit(x_train, y_train_log)
-predicted = np.expm1(model.predict(x_test))
-actual = test["total_audi"].astype(float).to_numpy()
-
-r2 = r2_score(actual, predicted)
-mae = mean_absolute_error(actual, predicted)
-rmse = mean_squared_error(actual, predicted) ** 0.5
-ape = np.abs(predicted - actual) / np.maximum(actual, 1)
-median_ape = np.median(ape) * 100
-
-st.subheader("모델 평가")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("학습 영화", f"{len(train):,}편")
-c2.metric("평가 영화", f"{len(test):,}편")
-c3.metric("결정계수 R²", f"{r2:.3f}")
-c4.metric("평균 절대 오차", f"{mae:,.0f}명")
-
-st.caption(
-    f"기준 기간: {period_start} ~ {period_end} · "
-    f"RMSE {rmse:,.0f}명 · 중앙 절대 백분율 오차 {median_ape:.1f}%"
+formatted_summary = summary.copy()
+formatted_summary["편수"] = formatted_summary["편수"].map(lambda value: f"{value:,.0f}")
+for column in ["스크린 수 평균", "누적 관객 평균", "10위권 일수 평균"]:
+    formatted_summary[column] = formatted_summary[column].map(lambda value: f"{value:,.1f}")
+formatted_summary["롱런 지수 평균"] = formatted_summary["롱런 지수 평균"].map(
+    lambda value: f"{value:,.2f}"
 )
-st.info(
-    "R²는 1에 가까울수록 좋습니다. 평균 절대 오차(MAE)는 예측이 실제 총 관객 수에서 "
-    "평균적으로 얼마나 빗나갔는지를 관객 수로 나타냅니다. 관객 수 편차가 커서 모델은 "
-    "총 관객 수의 log(1+x)를 학습했습니다."
+st.dataframe(formatted_summary, use_container_width=True)
+
+st.subheader("묶음별 누적 관객 상위 5편")
+top_movies = (
+    movies.sort_values(["묶음", "total_audi"], ascending=[True, False])
+    .groupby("묶음", observed=False)
+    .head(5)
 )
 
-below_floor = predicted < 1_000
-plot_y = np.maximum(predicted, 1_000)
-below_diagonal = predicted < actual
-above_diagonal = predicted > actual
-negative_prediction = predicted < 0
-axis_min = 1_000.0
-axis_max = max(actual.max(), plot_y.max()) * 1.15
-
-fig = go.Figure()
-fig.add_trace(
-    go.Scatter(
-        x=actual[~below_floor],
-        y=plot_y[~below_floor],
-        mode="markers",
-        name="예측 영화",
-        text=test.loc[~below_floor, "movieNm"],
-        customdata=np.c_[predicted[~below_floor]],
-        hovertemplate=(
-            "%{text}<br>실제: %{x:,.0f}명<br>예측: %{customdata[0]:,.0f}명<extra></extra>"
-        ),
-        marker=dict(size=9, opacity=0.72, color="#3B82F6"),
-    )
-)
-fig.add_trace(
-    go.Scatter(
-        x=actual[below_floor],
-        y=plot_y[below_floor],
-        mode="markers",
-        name="예측 1,000명 미만",
-        text=test.loc[below_floor, "movieNm"],
-        customdata=np.c_[predicted[below_floor]],
-        hovertemplate=(
-            "%{text}<br>실제: %{x:,.0f}명<br>예측: %{customdata[0]:,.0f}명"
-            "<br>그래프에는 1,000명 위치로 표시<extra></extra>"
-        ),
-        marker=dict(size=10, symbol="triangle-up", color="#EF4444"),
-    )
-)
-fig.add_trace(
-    go.Scatter(
-        x=[axis_min, axis_max],
-        y=[axis_min, axis_max],
-        mode="lines",
-        name="실제 = 예측",
-        line=dict(color="#111827", dash="dash"),
-        hoverinfo="skip",
-    )
-)
-fig.update_layout(
-    title="테스트 영화: 실제 총 관객 수와 예측 총 관객 수",
-    xaxis=dict(title="실제 총 관객 수", type="log", range=[np.log10(axis_min), np.log10(axis_max)]),
-    yaxis=dict(title="예측 총 관객 수", type="log", range=[np.log10(axis_min), np.log10(axis_max)]),
-    hovermode="closest",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    margin=dict(l=20, r=20, t=90, b=20),
-)
-scatter_col, scatter_stats_col = st.columns([4, 1])
-with scatter_col:
-    st.plotly_chart(fig, use_container_width=True)
-with scatter_stats_col:
-    st.markdown("#### 산점도 읽기")
-    st.metric("대각선 아래", f"{below_diagonal.sum():,}편")
-    st.caption("예측보다 실제 관객이 많은 영화")
-    st.metric("대각선 위", f"{above_diagonal.sum():,}편")
-    st.caption("실제보다 예측 관객이 많은 영화")
-    st.metric("음수 예측", f"{negative_prediction.sum():,}편")
-    st.metric("가장 작은 예측값", f"{predicted.min():,.1f}명")
-st.caption(f"예측값이 1,000명보다 작아 그래프 바닥(1,000명)에 표시된 영화: {below_floor.sum():,}편")
-
-residuals = actual - predicted
-error_detail = test[["movieCd", "movieNm", "first_scrn"]].copy()
-error_detail["오차"] = residuals
-error_detail["절대오차"] = np.abs(residuals)
-largest_errors = error_detail.nlargest(8, "절대오차").sort_values("오차")
-largest_errors["표시명"] = largest_errors.apply(
-    lambda row: f"{row['movieNm']} · 첫 스크린 {int(row['first_scrn']):,}개", axis=1
-)
-total_absolute_error = error_detail["절대오차"].sum()
-largest_error_share = (
-    largest_errors["절대오차"].sum() / total_absolute_error * 100
-    if total_absolute_error > 0
-    else 0.0
-)
-
-error_fig = go.Figure()
-for positive, label, color in (
-    (True, "실제가 더 많음", "#2563EB"),
-    (False, "예측이 더 많음", "#F97316"),
-):
-    direction_rows = largest_errors[(largest_errors["오차"] >= 0) == positive]
-    error_fig.add_trace(
-        go.Bar(
-            x=direction_rows["오차"],
-            y=direction_rows["표시명"],
-            orientation="h",
-            name=label,
-            marker_color=color,
-            text=direction_rows["오차"].map(lambda value: f"{value:+,.0f}명"),
-            textposition="outside",
-            customdata=np.c_[
-                direction_rows["절대오차"], direction_rows["first_scrn"]
-            ],
-            hovertemplate=(
-                "%{y}<br>실제−예측: %{x:+,.0f}명"
-                "<br>절대오차: %{customdata[0]:,.0f}명"
-                "<br>첫 관측일 스크린: %{customdata[1]:,.0f}개<extra></extra>"
-            ),
-        )
-    )
-error_fig.add_vline(x=0, line_width=2, line_color="#374151")
-error_fig.update_layout(
-    title="실제−예측 절대오차가 큰 영화 8편",
-    xaxis_title="오차(명): 왼쪽은 과대예측, 오른쪽은 과소예측",
-    yaxis=dict(
-        title=None,
-        categoryorder="array",
-        categoryarray=largest_errors["표시명"].tolist(),
-    ),
-    barmode="overlay",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    margin=dict(l=300, r=80, t=90, b=50),
-    height=520,
-)
-st.plotly_chart(error_fig, use_container_width=True)
-st.caption(
-    f"이 8편의 절대오차 합은 테스트 영화 전체 절대오차 합의 "
-    f"{largest_error_share:.1f}%입니다."
-)
-
-with st.expander("테스트 영화별 오차 보기"):
-    evaluation = test[["movieCd", "movieNm"]].copy()
-    evaluation["실제 총 관객"] = actual.astype(int)
-    evaluation["예측 총 관객"] = np.rint(predicted).astype(int)
-    evaluation["절대 오차"] = np.rint(np.abs(predicted - actual)).astype(int)
-    evaluation["절대 백분율 오차(%)"] = np.round(ape * 100, 1)
-    st.dataframe(evaluation, use_container_width=True, hide_index=True)
-
-st.subheader("영화별 표의 맨 위 10줄")
-st.dataframe(movies.head(10), use_container_width=True, hide_index=True)
-
-st.caption(
-    f"전체 {len(ordered):,}편을 빠짐없이 사용했습니다. 영화코드 순으로 정렬한 뒤 "
-    "각 10편마다 앞의 3편을 평가용으로, 나머지를 학습용으로 고정 분할했습니다."
-)
+columns = st.columns(3)
+for column, label in zip(columns, CLUSTER_LABELS):
+    with column:
+        st.markdown(f"#### {label}")
+        titles = top_movies.loc[top_movies["묶음"] == label, "movieNm"].tolist()
+        for rank, title in enumerate(titles, start=1):
+            st.write(f"{rank}. {title}")
