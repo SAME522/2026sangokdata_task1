@@ -1,120 +1,60 @@
-"""뇌졸중 예측 실습실 — 첫 화면: 데이터 소개와 데이터 사전 작성."""
+
+"""뇌졸중 예측 실습실 | 01 데이터 소개"""
 
 import pandas as pd
 import streamlit as st
 
-
 APP_TITLE = "뇌졸중 예측 실습실"
 DATA_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/stroke.csv"
-EXPECTED_COLUMNS = [
-    "id", "gender", "age", "hypertension", "heart_disease", "ever_married",
-    "work_type", "Residence_type", "avg_glucose_level", "bmi",
-    "smoking_status", "stroke",
+COLUMNS = [
+    "id", "gender", "age", "hypertension", "heart_disease",
+    "ever_married", "work_type", "Residence_type", "avg_glucose_level",
+    "bmi", "smoking_status", "stroke",
 ]
-BINARY_COLUMNS = {"hypertension", "heart_disease", "stroke"}
-
 
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 st.markdown(
     """
     <style>
-    /* 본문 너비와 여백 */
-    .block-container {
-        max-width: 1260px;
-        padding-top: 2.1rem;
-        padding-bottom: 4rem;
-    }
-    [data-testid="stHeader"] { background: transparent; }
+    .block-container {max-width: 1260px; padding-top: 2rem; padding-bottom: 4rem;}
+    [data-testid="stHeader"] {background: transparent;}
     .hero {
-        background: linear-gradient(122deg, #132f52 0%, #1b5473 52%, #087e87 100%);
-        color: #ffffff;
-        padding: 2.25rem 2.35rem;
-        border-radius: 22px;
-        box-shadow: 0 16px 38px rgba(13, 53, 78, 0.16);
-        margin-bottom: 1.6rem;
+        position: relative; overflow: hidden;
+        padding: 2.6rem 2.7rem; border-radius: 25px;
+        background: radial-gradient(circle at 92% 12%, #287c98 0, transparent 38%),
+                    linear-gradient(120deg, #101a3a 0%, #18486a 60%, #087e83 100%);
+        box-shadow: 0 16px 38px rgba(14, 43, 76, .18);
+        color: #fff; margin-bottom: 1.4rem;
     }
-    .hero-kicker {
-        font-size: 0.78rem;
-        font-weight: 750;
-        letter-spacing: 0.15em;
-        color: #abeae8;
-        margin-bottom: 0.65rem;
-    }
-    .hero-title {
-        font-size: clamp(1.7rem, 3.2vw, 2.6rem);
-        line-height: 1.28;
-        font-weight: 800;
-        letter-spacing: -0.055em;
-        margin: 0 0 0.75rem;
-        color: #ffffff;
-    }
-    .hero-description {
-        font-size: 1rem;
-        line-height: 1.8;
-        color: #e0f2f5;
-        margin: 0;
-        max-width: 800px;
-    }
-    .section-label {
-        font-size: 0.75rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        color: #0c8c94;
-        margin: 1.9rem 0 0.3rem;
-    }
-    .section-title {
-        font-size: 1.4rem;
-        font-weight: 800;
-        letter-spacing: -0.04em;
-        margin: 0 0 0.4rem;
-        color: inherit;
-    }
-    .section-desc {
-        opacity: 0.72;
-        font-size: 0.94rem;
-        margin: 0 0 1.05rem;
-    }
-    [data-testid="stMetric"] {
-        background: var(--secondary-background-color);
-        border: 1px solid rgba(103, 145, 159, 0.22);
-        border-radius: 16px;
-        padding: 1.15rem 1.25rem;
-        box-shadow: 0 7px 20px rgba(10, 55, 74, 0.045);
-        min-height: 132px;
-    }
-    [data-testid="stMetricLabel"] {
-        font-weight: 700;
-        opacity: 0.8;
-    }
-    [data-testid="stMetricValue"] {
-        font-size: clamp(1.75rem, 2.4vw, 2.4rem);
-        font-weight: 800;
-        letter-spacing: -0.055em;
-    }
+    .hero h1 {font-size: clamp(2rem, 3.5vw, 3rem); letter-spacing: -.055em;
+              line-height: 1.22; color: #fff; margin: .5rem 0 .8rem;}
+    .hero p {color: #e2f2fa; line-height: 1.85; max-width: 780px; margin: 0;}
+    .eyebrow {font-size: .77rem; letter-spacing: .15em; font-weight: 800;
+              color: #80ede3;}
+    .tag {display: inline-block; margin: 1.2rem .4rem 0 0; padding: .35rem .8rem;
+          background: #ffffff1e; border: 1px solid #ffffff45;
+          border-radius: 999px; color: #fff; font-size: .78rem;}
+    .section-kicker {font-size: .76rem; font-weight: 800; letter-spacing: .14em;
+                     color: #0c9b95; margin: 2.05rem 0 .3rem;}
+    .section-title {font-size: 1.5rem; font-weight: 800; letter-spacing: -.04em;
+                    margin: 0 0 .4rem;}
+    .section-sub {opacity: .76; font-size: .94rem; margin-bottom: 1.1rem;}
+    [data-testid="stMetric"] {background: var(--secondary-background-color);
+        border: 1px solid rgba(118,153,170,.22); border-radius: 18px;
+        padding: 1.1rem 1.2rem; min-height: 126px;}
+    [data-testid="stMetricValue"] {font-weight: 800; letter-spacing: -.04em;}
     div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {
-        border-radius: 12px;
-        overflow: hidden;
-    }
-    div.stDownloadButton > button {
-        border-radius: 10px;
-        font-weight: 700;
-        min-height: 42px;
-    }
-    .footnote {
-        font-size: 0.84rem;
-        opacity: 0.68;
-        margin-top: 0.5rem;
-    }
-    @media (max-width: 720px) {
-        .block-container { padding-top: 1rem; }
-        .hero { padding: 1.6rem 1.3rem; border-radius: 17px; }
-        .hero-description { font-size: 0.94rem; }
+        border-radius: 14px; overflow: hidden;}
+    div.stDownloadButton > button, div.stButton > button {border-radius: 12px;}
+    @media(max-width: 700px) {
+        .block-container {padding-top: 1rem;}
+        .hero {padding: 1.6rem 1.4rem; border-radius: 19px;}
     }
     </style>
     """,
@@ -123,181 +63,152 @@ st.markdown(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_stroke_data() -> pd.DataFrame:
-    """원격 UTF-8 CSV를 읽고 실습에 필요한 열 구성을 확인한다."""
+def load_data():
     data = pd.read_csv(DATA_URL, encoding="utf-8")
-    missing_columns = [name for name in EXPECTED_COLUMNS if name not in data.columns]
-    if missing_columns:
-        raise ValueError("필수 열이 없습니다: " + ", ".join(missing_columns))
+    missing = [col for col in COLUMNS if col not in data.columns]
+    if missing:
+        raise ValueError("필수 열 누락: " + ", ".join(missing))
     return data
 
 
-def describe_value_type(series: pd.Series, column_name: str) -> str:
-    """학습자가 알기 쉬운 값 종류 설명."""
-    if column_name == "id":
+def value_kind(series, name):
+    if name == "id":
         return "식별자 · 정수"
-    if column_name in BINARY_COLUMNS:
+    if name in ("hypertension", "heart_disease", "stroke"):
         return "이진형 · 0 / 1"
     if pd.api.types.is_numeric_dtype(series):
         return "수치형 · 정수" if pd.api.types.is_integer_dtype(series) else "수치형 · 실수"
-    count = series.nunique(dropna=True)
-    return f"범주형 · {count:,}종"
+    return f"범주형 · {series.nunique(dropna=True)}종"
 
+
+with st.sidebar:
+    st.markdown("### 🧠 실습실 메뉴")
+    st.caption("소개 화면에서 열을 익힌 다음 탐색 화면에서 그래프를 분석하세요.")
+    st.page_link("main.py", label="01 · 데이터 소개", icon="🏠")
+    st.page_link("pages/1_탐색.py", label="02 · 데이터 탐색", icon="🔎")
+    st.divider()
+    st.caption("데이터는 원격 CSV에서 UTF-8로 읽습니다.")
 
 st.markdown(
     """
     <div class="hero">
-      <div class="hero-kicker">DATA SCIENCE · INTRODUCTION</div>
-      <h1 class="hero-title">🧠 뇌졸중 예측 실습실</h1>
-      <p class="hero-description">
-        사람들의 건강·생활 습관 데이터를 살펴보고, 뇌졸중 발생 여부를 예측하는
-        데이터 과학 실습의 첫걸음입니다. 오늘은 먼저 데이터의 규모, 열의 의미,
-        빈 값을 확인해 봅니다.
-      </p>
+      <div class="eyebrow">STROKE DATA LAB / CHAPTER 01</div>
+      <h1>🧠 뇌졸중 예측 실습실</h1>
+      <p>건강·생활 습관 데이터로 배우는 데이터 과학.<br>
+      먼저 데이터를 이해하고, 다음 페이지에서 분포와 집단별 차이를 직접 살펴보세요.</p>
+      <span class="tag">01 데이터 소개</span>
+      <span class="tag">02 시각화 탐색</span>
+      <span class="tag">직접 작성하는 데이터 사전</span>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 try:
-    with st.spinner("실습 데이터를 불러오는 중입니다..."):
-        df = load_stroke_data()
+    with st.spinner("UTF-8 데이터를 불러오는 중..."):
+        df = load_data()
 except Exception as exc:
-    st.error("데이터를 불러오지 못했습니다. 인터넷 연결과 CSV 주소를 확인해 주세요.")
-    with st.expander("오류 상세 보기"):
+    st.error("데이터를 불러오지 못했습니다. 인터넷 연결 또는 데이터 주소를 확인하세요.")
+    with st.expander("자세한 오류"):
         st.code(str(exc))
-    if st.button("🔄 데이터 다시 불러오기"):
-        load_stroke_data.clear()
+    if st.button("🔄 다시 시도"):
+        load_data.clear()
         st.rerun()
     st.stop()
 
-person_count = len(df)
-column_count = len(df.columns)
-stroke_count = int(df["stroke"].eq(1).sum())
-stroke_rate = (stroke_count / person_count * 100) if person_count else 0.0
+n = len(df)
+num_stroke = int(df["stroke"].eq(1).sum())
+rate = num_stroke / n * 100 if n else 0.0
 
-st.markdown('<div class="section-label">01 · OVERVIEW</div>', unsafe_allow_html=True)
-st.markdown('<div class="section-title">한눈에 보는 데이터</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-kicker">01 / OVERVIEW</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">데이터 한눈에 보기</div>', unsafe_allow_html=True)
+a, b, c, d = st.columns(4)
+a.metric("👥 전체 사람 수", f"{n:,}명")
+b.metric("🧾 열 개수", f"{len(df.columns):,}개")
+c.metric("🧠 stroke = 1", f"{num_stroke:,}명")
+d.metric("📈 발생 비율", f"{rate:.2f}%")
+st.caption("계산 방법: 뇌졸중 발생 비율 = (stroke가 1인 사람 수 ÷ 전체 사람 수) × 100")
 
-col1, col2, col3, col4 = st.columns(4, gap="medium")
-with col1:
-    st.metric("👥 전체 사람 수", f"{person_count:,}명")
-with col2:
-    st.metric("🧾 전체 열 개수", f"{column_count:,}개")
-with col3:
-    st.metric("🧠 뇌졸중 발생 (stroke = 1)", f"{stroke_count:,}명")
-with col4:
-    st.metric("📊 뇌졸중 발생 비율", f"{stroke_rate:.2f}%")
-
-st.caption("💡 발생 비율 = (stroke가 1인 사람 수 ÷ 전체 사람 수) × 100")
-
-st.markdown('<div class="section-label">02 · DATA DICTIONARY</div>', unsafe_allow_html=True)
-st.markdown('<div class="section-title">열 이름과 값 알아보기</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-kicker">02 / DATA DICTIONARY</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">직접 완성하는 데이터 사전</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="section-desc">'
-    '교재를 참고해 <b>우리말 뜻</b> 칸을 직접 채워 보세요. 다른 칸은 원본 데이터에서 자동으로 계산됩니다.'
-    '</div>',
+    '<div class="section-sub">교재를 보고 <b>우리말 뜻</b> 칸을 채워 보세요. '
+    '나머지 항목은 원본 데이터에서 자동으로 계산됩니다.</div>',
     unsafe_allow_html=True,
 )
 
-# 편집 중 화면이 다시 실행되어도 입력한 우리말 뜻을 세션 내에서 유지한다.
 if "column_meanings" not in st.session_state:
-    st.session_state.column_meanings = {name: "" for name in df.columns}
+    st.session_state.column_meanings = {col: "" for col in df.columns}
 
-column_info = pd.DataFrame(
-    [
-        {
-            "열 이름": name,
-            "우리말 뜻": st.session_state.column_meanings.get(name, ""),
-            "값의 종류": describe_value_type(df[name], name),
-            "빈 값 개수": int(df[name].isna().sum()),
-        }
-        for name in df.columns
-    ]
-)
+table = pd.DataFrame([
+    {
+        "열 이름": col,
+        "우리말 뜻": st.session_state.column_meanings.get(col, ""),
+        "값의 종류": value_kind(df[col], col),
+        "빈 값 개수": int(df[col].isna().sum()),
+    }
+    for col in df.columns
+])
 
-edited_info = st.data_editor(
-    column_info,
+edited = st.data_editor(
+    table,
     key="column_dictionary_editor",
     hide_index=True,
     use_container_width=True,
-    height=464,
+    height=465,
     num_rows="fixed",
     disabled=["열 이름", "값의 종류", "빈 값 개수"],
-    column_order=["열 이름", "우리말 뜻", "값의 종류", "빈 값 개수"],
     column_config={
         "열 이름": st.column_config.TextColumn("열 이름", width="medium"),
-        "우리말 뜻": st.column_config.TextColumn(
-            "✏️ 우리말 뜻 (직접 입력)",
-            width="large",
-            help="교재를 보고 여기에 직접 입력하세요.",
-            max_chars=120,
-        ),
+        "우리말 뜻": st.column_config.TextColumn("✏️ 우리말 뜻", width="large"),
         "값의 종류": st.column_config.TextColumn("값의 종류", width="medium"),
-        "빈 값 개수": st.column_config.NumberColumn(
-            "빈 값 개수", format="%d", width="small"
-        ),
+        "빈 값 개수": st.column_config.NumberColumn("빈 값 개수", format="%d"),
     },
 )
 
-for row in edited_info.to_dict("records"):
-    value = row.get("우리말 뜻", "")
-    st.session_state.column_meanings[row["열 이름"]] = "" if pd.isna(value) else str(value)
+for record in edited.to_dict("records"):
+    val = record["우리말 뜻"]
+    st.session_state.column_meanings[record["열 이름"]] = "" if pd.isna(val) else str(val)
 
-completed_count = sum(bool(v.strip()) for v in st.session_state.column_meanings.values())
-st.progress(
-    completed_count / column_count if column_count else 0.0,
-    text=f"우리말 뜻 작성 현황 · {completed_count}/{column_count}개 완료",
-)
-
+complete = sum(bool(v.strip()) for v in st.session_state.column_meanings.values())
+st.progress(complete / len(df.columns), text=f"열 뜻 작성 진행률 · {complete}/{len(df.columns)}개")
 st.download_button(
-    "⬇️ 작성한 열 설명표 CSV 저장",
-    data=edited_info.to_csv(index=False).encode("utf-8-sig"),
+    "⬇️ 열 설명표 CSV 저장",
+    data=edited.to_csv(index=False).encode("utf-8-sig"),
     file_name="stroke_열설명표.csv",
     mime="text/csv",
-    help="입력한 우리말 뜻을 포함한 표를 저장합니다. 엑셀에서도 한글이 읽히도록 저장됩니다.",
 )
-
 missing_bmi = int(df["bmi"].isna().sum())
-if missing_bmi:
-    st.info(
-        f"🔎 **빈 값 관찰** · `bmi` 열에는 빈 값이 **{missing_bmi:,}개** 있습니다. "
-        "빈 값은 임의로 채우지 않고 그대로 표시합니다."
-    )
+st.info(f"💡 bmi의 빈 값: **{missing_bmi:,}개**. 다음 탐색 페이지에서 빈 값이 있는 집단의 뇌졸중 비율도 비교합니다.")
 
-st.markdown('<div class="section-label">03 · PREVIEW</div>', unsafe_allow_html=True)
-st.markdown('<div class="section-title">데이터 처음 5줄</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-desc">원본 데이터의 열 순서와 값을 바꾸지 않고 맨 앞 다섯 행만 보여 줍니다. '
-    '화면이 좁으면 표를 좌우로 스크롤하세요.</div>',
-    unsafe_allow_html=True,
-)
-st.dataframe(df.head(5), hide_index=True, use_container_width=True, height=232)
+st.markdown('<div class="section-kicker">03 / RAW DATA</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">원본 데이터 앞 5줄</div>', unsafe_allow_html=True)
+st.caption("행과 열의 원래 순서 및 값을 유지합니다. 표가 넓으면 좌우로 스크롤하세요.")
+st.dataframe(df.head(5), hide_index=True, use_container_width=True, height=226)
 
-st.markdown('<div class="section-label">04 · SOURCE</div>', unsafe_allow_html=True)
-st.markdown('<div class="section-title">데이터 출처 기록</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-desc">교재에 나온 데이터 출처를 아래에 직접 적어 보세요.</div>',
-    unsafe_allow_html=True,
-)
-source_note = st.text_area(
-    "데이터 출처",
+st.markdown('<div class="section-kicker">04 / SOURCE NOTE</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">데이터 출처 직접 기록</div>', unsafe_allow_html=True)
+st.caption("교재에 나온 출처 내용을 아래 빈칸에 입력하세요.")
+note = st.text_area(
+    "데이터 출처 기록란",
     key="data_source_note",
-    placeholder="교재를 확인한 후 출처를 입력하세요.",
-    height=118,
+    placeholder="교재를 참고해 데이터 출처를 적어 보세요.",
+    height=115,
     label_visibility="collapsed",
 )
-left, right = st.columns([1, 2], gap="medium")
-with left:
-    st.download_button(
-        "⬇️ 출처 메모 TXT 저장",
-        data=source_note.encode("utf-8-sig"),
-        file_name="stroke_데이터출처.txt",
-        mime="text/plain",
-        disabled=not source_note.strip(),
-    )
-with right:
-    st.caption("작성한 내용은 현재 접속 중인 세션에 보관됩니다. 종료하거나 새로고침하기 전에 파일로 저장해 주세요.")
+st.download_button(
+    "⬇️ 출처 메모 TXT 저장",
+    data=note.encode("utf-8-sig"),
+    file_name="stroke_데이터출처.txt",
+    mime="text/plain",
+    disabled=not note.strip(),
+)
+st.caption("입력 내용은 현재 브라우저 세션에 보관됩니다. 중요한 내용은 다운로드해 두세요.")
 
 st.divider()
-st.caption("🧠 뇌졸중 예측 실습실 · 데이터 이해부터 시작하는 머신러닝 실습")
+left, right = st.columns([2, 1])
+with left:
+    st.markdown("**다음 단계: 나이·혈당·고혈압·심장병·흡연 상태 탐색하기**")
+    st.caption("탐색 페이지에서 필터를 바꾸고 그래프 위에 마우스를 올려 상세 정보를 확인하세요.")
+with right:
+    st.page_link("pages/1_탐색.py", label="🔎 탐색 페이지로 이동 →", use_container_width=True)
