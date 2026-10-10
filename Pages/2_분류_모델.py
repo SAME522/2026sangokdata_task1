@@ -1,4 +1,5 @@
 
+import textwrap
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -59,180 +60,26 @@ SEED = 42
 # 02. 합체로봇 스타일 디자인
 # =========================================================
 
-st.markdown("""
-<style>
-.model-hero {
-    position: relative;
-    background: linear-gradient(
-        114deg,
-        #F5F7FF 0%,
-        #EDF9FF 45%,
-        #FFF0F8 100%
-    );
-    border: 1px solid #DBE4FF;
-    border-radius: 22px;
-    padding: 39px 42px;
-    overflow: hidden;
-    margin: 14px 0 28px;
-}
-
-.model-hero:after {
-    content: "✦";
-    position: absolute;
-    right: 35px;
-    top: -42px;
-    font-size: 210px;
-    color: #E968C624;
-    transform: rotate(-12deg);
-    pointer-events: none;
-}
-
-.model-kicker {
-    font-size: 12px;
-    color: #386BFA;
-    font-weight: 900;
-    letter-spacing: .16em;
-}
-
-.model-title {
-    color: #202943;
-    font-size: clamp(34px, 5vw, 62px);
-    font-weight: 950;
-    letter-spacing: -.075em;
-    line-height: 1.16;
-    margin: 16px 0 15px;
-}
-
-.model-title span {
-    background: linear-gradient(
-        95deg,
-        #F34E67 0%,
-        #E968C6 48%,
-        #386BFA 100%
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.model-lead {
-    color: #4A5A77;
-    font-size: 15px;
-    line-height: 1.85;
-    max-width: 700px;
-}
-
-.color-bars {
-    display: flex;
-    gap: 6px;
-    margin-top: 27px;
-    max-width: 260px;
-}
-
-.color-bars i {
-    height: 7px;
-    border-radius: 20px;
-    flex: 1;
-}
-
-.model-step {
-    margin: 43px 0 19px;
-    padding-top: 19px;
-    border-top: 1px solid #DAE2F2;
-    display: flex;
-    align-items: baseline;
-    gap: 16px;
-}
-
-.model-step b {
-    color: #386BFA;
-    font-size: 12px;
-}
-
-.model-step span {
-    font-size: 25px;
-    color: #202943;
-    letter-spacing: -.045em;
-    font-weight: 850;
-}
-
-.model-intro {
-    color: #68758D;
-    font-size: 14px;
-    margin: -8px 0 22px;
-    line-height: 1.8;
-}
-
-.score-card {
-    border: 1px solid #DFE5F1;
-    background: white;
-    border-radius: 15px;
-    padding: 20px;
-    box-shadow: 0 8px 28px #3850740D;
-    min-height: 160px;
-}
-
-.score-card .tag {
-    display: inline-block;
-    padding: 5px 9px;
-    font-size: 11px;
-    font-weight: 850;
-    border-radius: 5px;
-    color: white;
-    margin-bottom: 13px;
-}
-
-.score-card .label {
-    font-size: 13px;
-    color: #4A5871;
-    font-weight: 700;
-}
-
-.score-card .number {
-    font-size: clamp(30px, 4vw, 48px);
-    font-weight: 900;
-    letter-spacing: -.06em;
-    line-height: 1.3;
-    color: #202943;
-}
-
-.score-card .caption {
-    font-size: 12px;
-    color: #70809A;
-    margin-top: 4px;
-}
-
-.model-note {
-    border-left: 4px solid #386BFA;
-    background: #F0F4FF;
-    border-radius: 0 10px 10px 0;
-    padding: 15px 19px;
-    color: #43516D;
-    line-height: 1.8;
-}
-
-.legend-note {
-    background: #FFF9E8;
-    border: 1px solid #F5E7B6;
-    border-radius: 11px;
-    padding: 15px 18px;
-    color: #61573F;
-    line-height: 1.8;
-    font-size: 13px;
-}
-
-@media(max-width: 700px) {
-    .model-hero {
-        padding: 28px 24px;
-    }
-
-    .model-step {
-        margin-top: 32px;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
+st.markdown(
+    '<div class="model-hero">'
+    '<div class="model-kicker">03 / MODEL ARENA · SPECTRUM FIVE</div>'
+    '<div class="model-title">데이터 분류 실험,<br>'
+    '<span>모델 합체 작전!</span></div>'
+    '<div class="model-lead">'
+    '같은 채점용 사람들을 놓고 세 가지 답변 전략을 겨룹니다. '
+    '다섯 색으로 실제 정답과 모델의 판단을 구분하며 '
+    '분류 경계를 탐험해 보세요.'
+    '</div>'
+    '<div class="color-bars">'
+    '<i style="background:#F34E67"></i>'
+    '<i style="background:#386BFA"></i>'
+    '<i style="background:#19B58A"></i>'
+    '<i style="background:#FFC83D"></i>'
+    '<i style="background:#E968C6"></i>'
+    '</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 # =========================================================
 # 03. 데이터 읽기
