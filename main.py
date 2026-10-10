@@ -1,369 +1,303 @@
-
-"""급식 규칙 찾기 | Streamlit 메뉴 연관 규칙 분석 앱."""
-
-import re
-from collections import Counter, defaultdict
-from io import BytesIO
-from itertools import combinations
+"""뇌졸중 예측 실습실 — 첫 화면: 데이터 소개와 데이터 사전 작성."""
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 
-DEFAULT_CSV_URL = (
-    "https://raw.githubusercontent.com/teacher188-netizen/"
-    "2026-datascience/refs/heads/main/dorim_meals.csv"
-)
-RULE_COLUMNS = ["조건", "결과", "동시", "지지도", "신뢰도", "향상도"]
+APP_TITLE = "뇌졸중 예측 실습실"
+DATA_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/stroke.csv"
+EXPECTED_COLUMNS = [
+    "id", "gender", "age", "hypertension", "heart_disease", "ever_married",
+    "work_type", "Residence_type", "avg_glucose_level", "bmi",
+    "smoking_status", "stroke",
+]
+BINARY_COLUMNS = {"hypertension", "heart_disease", "stroke"}
+
 
 st.set_page_config(
-    page_title="급식 규칙 찾기 | 도림 급식 데이터",
-    page_icon="🍱",
+    page_title=APP_TITLE,
+    page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
     """
     <style>
-    .block-container {max-width: 1250px; padding-top: 2rem; padding-bottom: 3rem;}
-    h1, h2, h3 {letter-spacing: -0.035em;}
-    div[data-testid="stMetric"] {
-        border: 1px solid rgba(128,128,128,0.22);
-        border-radius: 15px;
-        padding: 0.95rem 1.1rem;
-        background: rgba(128,128,128,0.055);
+    /* 본문 너비와 여백 */
+    .block-container {
+        max-width: 1260px;
+        padding-top: 2.1rem;
+        padding-bottom: 4rem;
     }
-    div[data-testid="stMetricLabel"] {font-weight: 650;}
-    .helper-text {opacity: .8; font-size: .93rem; line-height: 1.65;}
+    [data-testid="stHeader"] { background: transparent; }
+    .hero {
+        background: linear-gradient(122deg, #132f52 0%, #1b5473 52%, #087e87 100%);
+        color: #ffffff;
+        padding: 2.25rem 2.35rem;
+        border-radius: 22px;
+        box-shadow: 0 16px 38px rgba(13, 53, 78, 0.16);
+        margin-bottom: 1.6rem;
+    }
+    .hero-kicker {
+        font-size: 0.78rem;
+        font-weight: 750;
+        letter-spacing: 0.15em;
+        color: #abeae8;
+        margin-bottom: 0.65rem;
+    }
+    .hero-title {
+        font-size: clamp(1.7rem, 3.2vw, 2.6rem);
+        line-height: 1.28;
+        font-weight: 800;
+        letter-spacing: -0.055em;
+        margin: 0 0 0.75rem;
+        color: #ffffff;
+    }
+    .hero-description {
+        font-size: 1rem;
+        line-height: 1.8;
+        color: #e0f2f5;
+        margin: 0;
+        max-width: 800px;
+    }
+    .section-label {
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        color: #0c8c94;
+        margin: 1.9rem 0 0.3rem;
+    }
+    .section-title {
+        font-size: 1.4rem;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        margin: 0 0 0.4rem;
+        color: inherit;
+    }
+    .section-desc {
+        opacity: 0.72;
+        font-size: 0.94rem;
+        margin: 0 0 1.05rem;
+    }
+    [data-testid="stMetric"] {
+        background: var(--secondary-background-color);
+        border: 1px solid rgba(103, 145, 159, 0.22);
+        border-radius: 16px;
+        padding: 1.15rem 1.25rem;
+        box-shadow: 0 7px 20px rgba(10, 55, 74, 0.045);
+        min-height: 132px;
+    }
+    [data-testid="stMetricLabel"] {
+        font-weight: 700;
+        opacity: 0.8;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: clamp(1.75rem, 2.4vw, 2.4rem);
+        font-weight: 800;
+        letter-spacing: -0.055em;
+    }
+    div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    div.stDownloadButton > button {
+        border-radius: 10px;
+        font-weight: 700;
+        min-height: 42px;
+    }
+    .footnote {
+        font-size: 0.84rem;
+        opacity: 0.68;
+        margin-top: 0.5rem;
+    }
+    @media (max-width: 720px) {
+        .block-container { padding-top: 1rem; }
+        .hero { padding: 1.6rem 1.3rem; border-radius: 17px; }
+        .hero-description { font-size: 0.94rem; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def read_csv_from_url(url: str) -> pd.DataFrame:
-    """UTF-8 또는 UTF-8 BOM CSV를 읽습니다."""
-    return pd.read_csv(url, encoding="utf-8-sig")
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_stroke_data() -> pd.DataFrame:
+    """원격 UTF-8 CSV를 읽고 실습에 필요한 열 구성을 확인한다."""
+    data = pd.read_csv(DATA_URL, encoding="utf-8")
+    missing_columns = [name for name in EXPECTED_COLUMNS if name not in data.columns]
+    if missing_columns:
+        raise ValueError("필수 열이 없습니다: " + ", ".join(missing_columns))
+    return data
 
 
-@st.cache_data(show_spinner=False)
-def read_csv_from_bytes(data: bytes) -> pd.DataFrame:
-    return pd.read_csv(BytesIO(data), encoding="utf-8-sig")
+def describe_value_type(series: pd.Series, column_name: str) -> str:
+    """학습자가 알기 쉬운 값 종류 설명."""
+    if column_name == "id":
+        return "식별자 · 정수"
+    if column_name in BINARY_COLUMNS:
+        return "이진형 · 0 / 1"
+    if pd.api.types.is_numeric_dtype(series):
+        return "수치형 · 정수" if pd.api.types.is_integer_dtype(series) else "수치형 · 실수"
+    count = series.nunique(dropna=True)
+    return f"범주형 · {count:,}종"
 
 
-def clean_menu(value: str) -> str:
-    """메뉴 이름의 () 및 （） 괄호와 내부 내용(중첩 포함)을 제거합니다."""
-    text = str(value)
-    patterns = (r"\([^()]*\)", r"（[^（）]*）")
-    while True:
-        before = text
-        for pattern in patterns:
-            text = re.sub(pattern, "", text)
-        if text == before:
-            break
-    return " ".join(text.split()).strip()
-
-
-@st.cache_data(show_spinner=False)
-def analyze(raw_df: pd.DataFrame):
-    """CSV 한 행(하루 식단)을 하나의 장바구니로 분석합니다."""
-    df = raw_df.copy()
-    df.columns = df.columns.astype(str).str.strip().str.replace("\ufeff", "", regex=False)
-    required = {"날짜", "식사", "메뉴"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"필요한 열이 없습니다: {', '.join(sorted(missing))}")
-
-    # 같은 날 같은 메뉴가 두 번 있어도 그날 1회로만 계산합니다.
-    transactions = []
-    for raw in df["메뉴"].dropna():
-        basket = {clean_menu(part) for part in str(raw).split("|")}
-        basket.discard("")
-        if basket:
-            transactions.append(basket)
-
-    day_count = len(transactions)
-    if day_count == 0:
-        raise ValueError("분석할 메뉴가 없습니다. 메뉴 열을 확인해 주세요.")
-
-    menu_days = Counter(item for basket in transactions for item in basket)
-    pair_days = Counter(
-        pair
-        for basket in transactions
-        for pair in combinations(sorted(basket), 2)
-    )
-
-    records = []
-    for (a, b), together in pair_days.items():
-        for condition, result in ((a, b), (b, a)):
-            support = together / day_count
-            confidence = together / menu_days[condition]
-            lift = confidence / (menu_days[result] / day_count)
-            records.append(
-                {
-                    "조건": condition,
-                    "결과": result,
-                    "동시": together,
-                    "지지도": support,
-                    "신뢰도": confidence,
-                    "향상도": lift,
-                }
-            )
-
-    rules = pd.DataFrame(records, columns=RULE_COLUMNS)
-
-    # "함께 나온 적 없는 짝"을 빠르게 찾기 위한 동시 등장 메뉴 집합
-    neighbors = defaultdict(set)
-    for a, b in pair_days:
-        neighbors[a].add(b)
-        neighbors[b].add(a)
-
-    return day_count, menu_days, pair_days, rules, dict(neighbors)
-
-
-def csv_bytes(frame: pd.DataFrame) -> bytes:
-    # 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM으로 내려받습니다.
-    return frame.to_csv(index=False).encode("utf-8-sig")
-
-
-st.title("🍱 급식 규칙 찾기")
 st.markdown(
-    '<div class="helper-text">한 날의 식단을 하나의 장바구니로 보고, '
-    '메뉴들의 동시 등장 규칙과 함께 등장하지 않은 조합을 알아봅니다.</div>',
+    """
+    <div class="hero">
+      <div class="hero-kicker">DATA SCIENCE · INTRODUCTION</div>
+      <h1 class="hero-title">🧠 뇌졸중 예측 실습실</h1>
+      <p class="hero-description">
+        사람들의 건강·생활 습관 데이터를 살펴보고, 뇌졸중 발생 여부를 예측하는
+        데이터 과학 실습의 첫걸음입니다. 오늘은 먼저 데이터의 규모, 열의 의미,
+        빈 값을 확인해 봅니다.
+      </p>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-with st.sidebar:
-    st.header("📁 데이터 설정")
-    source_url = st.text_input(
-        "CSV 데이터 주소",
-        value=DEFAULT_CSV_URL,
-        help="날짜, 식사, 메뉴 열이 있는 UTF-8 CSV의 직접 다운로드 주소를 사용하세요.",
-    )
-    uploaded_file = st.file_uploader(
-        "또는 CSV 파일 업로드", type=["csv"], help="업로드한 파일이 CSV 주소보다 우선합니다."
-    )
-    st.caption("CSV 파일을 업로드하면 입력한 주소 대신 업로드 파일로 분석합니다.")
-    st.divider()
-    st.markdown("**🔎 메뉴 정리 기준**")
-    st.caption("메뉴명에서 괄호와 그 안의 설명을 모두 제거합니다.")
-    st.caption("예: 배추김치(완) → 배추김치")
-    st.caption("한 행의 같은 메뉴는 한 번만 계산합니다.")
-
 try:
-    if uploaded_file is not None:
-        raw_df = read_csv_from_bytes(uploaded_file.getvalue())
-        source_name = f"업로드 파일 · {uploaded_file.name}"
-    elif source_url.strip():
-        raw_df = read_csv_from_url(source_url.strip())
-        source_name = "CSV 웹 주소"
-    else:
-        st.info("왼쪽에서 CSV 주소를 입력하거나 파일을 업로드해 주세요.")
-        st.stop()
-    day_count, menu_days, pair_days, rules_df, neighbors = analyze(raw_df)
+    with st.spinner("실습 데이터를 불러오는 중입니다..."):
+        df = load_stroke_data()
 except Exception as exc:
-    st.error(f"데이터를 분석하지 못했습니다: {exc}")
-    st.info("CSV 주소가 직접 다운로드 링크인지, 열 이름이 날짜·식사·메뉴인지 확인해 주세요.")
+    st.error("데이터를 불러오지 못했습니다. 인터넷 연결과 CSV 주소를 확인해 주세요.")
+    with st.expander("오류 상세 보기"):
+        st.code(str(exc))
+    if st.button("🔄 데이터 다시 불러오기"):
+        load_stroke_data.clear()
+        st.rerun()
     st.stop()
 
-menus = sorted(menu_days)
-st.caption(f"✅ 데이터 불러오기 완료 · {source_name} · 괄호 내용 제거 적용")
+person_count = len(df)
+column_count = len(df.columns)
+stroke_count = int(df["stroke"].eq(1).sum())
+stroke_rate = (stroke_count / person_count * 100) if person_count else 0.0
 
-# 기본 통계: 아래의 필터와 무관한 전체 데이터 기준
-kpi1, kpi2, kpi3 = st.columns(3)
-kpi1.metric("🗓️ 급식 일수", f"{day_count:,}일")
-kpi2.metric("🥗 메뉴 종류 수", f"{len(menu_days):,}개")
-kpi3.metric("🤝 함께 나온 메뉴 쌍", f"{len(pair_days):,}쌍")
+st.markdown('<div class="section-label">01 · OVERVIEW</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">한눈에 보는 데이터</div>', unsafe_allow_html=True)
 
-st.divider()
-st.header("📊 메뉴 연관 규칙")
-st.caption("조건 → 결과와 결과 → 조건을 각각 별개의 규칙으로 보여 줍니다.")
+col1, col2, col3, col4 = st.columns(4, gap="medium")
+with col1:
+    st.metric("👥 전체 사람 수", f"{person_count:,}명")
+with col2:
+    st.metric("🧾 전체 열 개수", f"{column_count:,}개")
+with col3:
+    st.metric("🧠 뇌졸중 발생 (stroke = 1)", f"{stroke_count:,}명")
+with col4:
+    st.metric("📊 뇌졸중 발생 비율", f"{stroke_rate:.2f}%")
 
-# 메뉴 선택과 정렬은 독립적이며, 슬라이더는 표 및 그래프에 함께 적용됩니다.
-c1, c2, c3 = st.columns([1.3, 1.0, 1.3], gap="large")
-with c1:
-    selected_rule_menu = st.selectbox(
-        "🔍 규칙에서 메뉴 좁혀 보기",
-        ["전체 메뉴"] + menus,
-        key="rule_menu_filter",
-        help="선택한 메뉴가 조건 또는 결과인 규칙만 표시합니다.",
-    )
-with c2:
-    sort_by = st.selectbox("↕️ 규칙 정렬 기준", ["향상도", "신뢰도", "동시"], key="rule_sort")
-with c3:
-    min_together = st.slider(
-        "🎚️ 최소 동시 일수",
-        min_value=1,
-        max_value=10,
-        value=1,
-        step=1,
-        key="min_together_days",
-        help="함께 등장한 일수가 선택한 값보다 적은 규칙을 제외합니다.",
-    )
+st.caption("💡 발생 비율 = (stroke가 1인 사람 수 ÷ 전체 사람 수) × 100")
 
-filtered = rules_df[rules_df["동시"] >= min_together].copy()
-if selected_rule_menu != "전체 메뉴":
-    filtered = filtered.loc[
-        (filtered["조건"] == selected_rule_menu)
-        | (filtered["결과"] == selected_rule_menu)
-    ]
-
-# 동일한 동률 처리로 정렬 결과를 일정하게 유지합니다.
-priority = [sort_by] + [col for col in ("향상도", "신뢰도", "동시") if col != sort_by]
-filtered = filtered.sort_values(
-    priority + ["조건", "결과"],
-    ascending=[False, False, False, True, True],
-    kind="stable",
-)
-
+st.markdown('<div class="section-label">02 · DATA DICTIONARY</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">열 이름과 값 알아보기</div>', unsafe_allow_html=True)
 st.markdown(
-    f"**📌 현재 표에 남은 규칙: {len(filtered):,}개** "
-    f"(동시 {min_together}일 이상 · "
-    f"메뉴: {selected_rule_menu})"
+    '<div class="section-desc">'
+    '교재를 참고해 <b>우리말 뜻</b> 칸을 직접 채워 보세요. 다른 칸은 원본 데이터에서 자동으로 계산됩니다.'
+    '</div>',
+    unsafe_allow_html=True,
 )
 
-# 수치 계산은 0~1 비율로 보관하고, 표에서만 % 단위로 표시합니다.
-display_rules = filtered.copy()
-display_rules["지지도"] = display_rules["지지도"] * 100
-display_rules["신뢰도"] = display_rules["신뢰도"] * 100
+# 편집 중 화면이 다시 실행되어도 입력한 우리말 뜻을 세션 내에서 유지한다.
+if "column_meanings" not in st.session_state:
+    st.session_state.column_meanings = {name: "" for name in df.columns}
 
-if filtered.empty:
-    st.info("현재 조건에 해당하는 규칙이 없습니다. 최소 동시 일수를 낮추거나 전체 메뉴를 선택해 보세요.")
-else:
-    st.dataframe(
-        display_rules,
-        use_container_width=True,
-        hide_index=True,
-        height=min(540, 48 + len(display_rules) * 35),
-        column_config={
-            "조건": st.column_config.TextColumn("조건"),
-            "결과": st.column_config.TextColumn("결과"),
-            "동시": st.column_config.NumberColumn("동시", format="%d일"),
-            "지지도": st.column_config.NumberColumn("지지도", format="%.2f%%"),
-            "신뢰도": st.column_config.NumberColumn("신뢰도", format="%.2f%%"),
-            "향상도": st.column_config.NumberColumn("향상도", format="%.3f"),
-        },
+column_info = pd.DataFrame(
+    [
+        {
+            "열 이름": name,
+            "우리말 뜻": st.session_state.column_meanings.get(name, ""),
+            "값의 종류": describe_value_type(df[name], name),
+            "빈 값 개수": int(df[name].isna().sum()),
+        }
+        for name in df.columns
+    ]
+)
+
+edited_info = st.data_editor(
+    column_info,
+    key="column_dictionary_editor",
+    hide_index=True,
+    use_container_width=True,
+    height=464,
+    num_rows="fixed",
+    disabled=["열 이름", "값의 종류", "빈 값 개수"],
+    column_order=["열 이름", "우리말 뜻", "값의 종류", "빈 값 개수"],
+    column_config={
+        "열 이름": st.column_config.TextColumn("열 이름", width="medium"),
+        "우리말 뜻": st.column_config.TextColumn(
+            "✏️ 우리말 뜻 (직접 입력)",
+            width="large",
+            help="교재를 보고 여기에 직접 입력하세요.",
+            max_chars=120,
+        ),
+        "값의 종류": st.column_config.TextColumn("값의 종류", width="medium"),
+        "빈 값 개수": st.column_config.NumberColumn(
+            "빈 값 개수", format="%d", width="small"
+        ),
+    },
+)
+
+for row in edited_info.to_dict("records"):
+    value = row.get("우리말 뜻", "")
+    st.session_state.column_meanings[row["열 이름"]] = "" if pd.isna(value) else str(value)
+
+completed_count = sum(bool(v.strip()) for v in st.session_state.column_meanings.values())
+st.progress(
+    completed_count / column_count if column_count else 0.0,
+    text=f"우리말 뜻 작성 현황 · {completed_count}/{column_count}개 완료",
+)
+
+st.download_button(
+    "⬇️ 작성한 열 설명표 CSV 저장",
+    data=edited_info.to_csv(index=False).encode("utf-8-sig"),
+    file_name="stroke_열설명표.csv",
+    mime="text/csv",
+    help="입력한 우리말 뜻을 포함한 표를 저장합니다. 엑셀에서도 한글이 읽히도록 저장됩니다.",
+)
+
+missing_bmi = int(df["bmi"].isna().sum())
+if missing_bmi:
+    st.info(
+        f"🔎 **빈 값 관찰** · `bmi` 열에는 빈 값이 **{missing_bmi:,}개** 있습니다. "
+        "빈 값은 임의로 채우지 않고 그대로 표시합니다."
     )
+
+st.markdown('<div class="section-label">03 · PREVIEW</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">데이터 처음 5줄</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="section-desc">원본 데이터의 열 순서와 값을 바꾸지 않고 맨 앞 다섯 행만 보여 줍니다. '
+    '화면이 좁으면 표를 좌우로 스크롤하세요.</div>',
+    unsafe_allow_html=True,
+)
+st.dataframe(df.head(5), hide_index=True, use_container_width=True, height=232)
+
+st.markdown('<div class="section-label">04 · SOURCE</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">데이터 출처 기록</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="section-desc">교재에 나온 데이터 출처를 아래에 직접 적어 보세요.</div>',
+    unsafe_allow_html=True,
+)
+source_note = st.text_area(
+    "데이터 출처",
+    key="data_source_note",
+    placeholder="교재를 확인한 후 출처를 입력하세요.",
+    height=118,
+    label_visibility="collapsed",
+)
+left, right = st.columns([1, 2], gap="medium")
+with left:
     st.download_button(
-        "⬇️ 현재 규칙 표 CSV 다운로드",
-        data=csv_bytes(display_rules),
-        file_name="meal_association_rules.csv",
-        mime="text/csv",
-        key="download_rules",
+        "⬇️ 출처 메모 TXT 저장",
+        data=source_note.encode("utf-8-sig"),
+        file_name="stroke_데이터출처.txt",
+        mime="text/plain",
+        disabled=not source_note.strip(),
     )
-
-st.subheader("📈 향상도 상위 10개 규칙")
-st.caption("위에서 선택한 메뉴와 최소 동시 일수 조건을 그래프에도 동일하게 적용합니다.")
-if filtered.empty:
-    st.info("표시할 규칙이 없어 그래프가 비어 있습니다.")
-else:
-    top10 = (
-        filtered.sort_values(
-            ["향상도", "신뢰도", "동시", "조건", "결과"],
-            ascending=[False, False, False, True, True],
-        )
-        .head(10)
-        .copy()
-    )
-    top10["규칙"] = top10["조건"] + " → " + top10["결과"]
-    top10["지지도(%)"] = top10["지지도"] * 100
-    top10["신뢰도(%)"] = top10["신뢰도"] * 100
-    top10 = top10.iloc[::-1]
-    chart = px.bar(
-        top10,
-        x="향상도",
-        y="규칙",
-        orientation="h",
-        text="향상도",
-        color="향상도",
-        color_continuous_scale="Tealgrn",
-        hover_data={
-            "동시": True,
-            "지지도(%)": ":.2f",
-            "신뢰도(%)": ":.2f",
-            "향상도": ":.3f",
-        },
-    )
-    chart.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
-    chart.update_layout(
-        height=max(330, len(top10) * 49 + 90),
-        margin=dict(l=10, r=60, t=15, b=10),
-        xaxis_title="향상도 (Lift)",
-        yaxis_title=None,
-        coloraxis_showscale=False,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-    chart.update_xaxes(showgrid=True, gridcolor="rgba(128,128,128,0.18)")
-    st.plotly_chart(chart, use_container_width=True)
-
-with st.expander("ℹ️ 지지도·신뢰도·향상도 계산 방법"):
-    st.markdown(
-        """
-        - **동시:** 조건 메뉴와 결과 메뉴가 같은 날 함께 나온 일수
-        - **지지도:** 동시 등장 일수 ÷ 전체 급식 일수
-        - **신뢰도:** 동시 등장 일수 ÷ 조건 메뉴의 등장 일수
-        - **향상도:** 신뢰도 ÷ 결과 메뉴의 등장 비율
-
-        향상도 **1 초과**는 두 메뉴가 우연한 독립 등장보다 더 자주 함께 나온다는 뜻입니다.
-        함께 나온 일수가 아주 적은 규칙은 향상도가 높아도 해석에 주의하세요.
-        """
-    )
+with right:
+    st.caption("작성한 내용은 현재 접속 중인 세션에 보관됩니다. 종료하거나 새로고침하기 전에 파일로 저장해 주세요.")
 
 st.divider()
-st.header("🧩 함께 나온 적 없는 짝")
-st.caption(
-    "선택한 메뉴와 같은 날 **단 한 번도 함께 등장하지 않았고**, "
-    "자신은 **10일 이상 등장한** 메뉴를 찾습니다. "
-    "이 분석은 위의 규칙 필터·슬라이더와 별개입니다."
-)
-
-# 규칙 필터와 다른 이름, 다른 key로 완전히 독립적으로 관리합니다.
-selected_absent_menu = st.selectbox(
-    "🍽️ 함께 나온 적 없는 짝을 찾을 기준 메뉴",
-    menus,
-    key="absent_pair_menu",
-    help="위의 '규칙에서 메뉴 좁혀 보기'와 별개로 선택합니다.",
-)
-
-never_together = [
-    (menu, count)
-    for menu, count in menu_days.items()
-    if menu != selected_absent_menu
-    and count >= 10
-    and menu not in neighbors.get(selected_absent_menu, set())
-]
-never_together.sort(key=lambda value: (-value[1], value[0]))
-
-m1, m2 = st.columns(2)
-m1.metric("🍽️ 선택 메뉴가 나온 날", f"{menu_days[selected_absent_menu]:,}일")
-m2.metric("🧩 함께 나온 적 없는 짝", f"{len(never_together):,}개")
-
-if never_together:
-    absent_df = pd.DataFrame(never_together, columns=["함께 나온 적 없는 메뉴", "나온 날 수"])
-    st.dataframe(
-        absent_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "함께 나온 적 없는 메뉴": st.column_config.TextColumn("함께 나온 적 없는 메뉴"),
-            "나온 날 수": st.column_config.NumberColumn("나온 날 수", format="%d일"),
-        },
-    )
-    st.download_button(
-        "⬇️ 함께 나온 적 없는 짝 CSV 다운로드",
-        data=csv_bytes(absent_df),
-        file_name="meal_never_together.csv",
-        mime="text/csv",
-        key="download_absent",
-    )
-else:
-    st.info("이 메뉴와 한 번도 함께 나오지 않으면서 10일 이상 등장한 다른 메뉴가 없습니다.")
-
-st.caption(
-    "※ 모든 등장 일수는 분석한 CSV에서 메뉴가 포함된 식단 행 수를 기준으로 계산합니다. "
-    "메뉴 이름의 괄호 및 괄호 안 설명은 제거하고 집계합니다."
-)
+st.caption("🧠 뇌졸중 예측 실습실 · 데이터 이해부터 시작하는 머신러닝 실습")
